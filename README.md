@@ -1,5 +1,9 @@
 # CS6013 — Efficient AI — Compression Pipeline
 
+> Working in this repo with Claude Code? Start with `CLAUDE.md` (and the
+> nested `CLAUDE.md` in each subdirectory) — they cover the grading-critical
+> rules this README doesn't repeat.
+
 Reorganized off the old `skylight-org/efficient_ai_CS6013_2026Fall` starter
 template (now confirmed stale — see the project source-of-truth doc). This
 repo now tracks the **actual** grading harness
