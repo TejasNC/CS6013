@@ -1,0 +1,54 @@
+# Local dev/eval config, adapted from the TA eval repo's committed
+# evaluation/configs/config.yaml (https://github.com/lavinianongbri/cs6013).
+# Sampling/decoding parameters below are copied verbatim from that file —
+# don't change them without a reason, since they're what the leaderboard
+# grader actually uses (confirmed exactly: temp=1.0, 32000 max_new_tokens,
+# thinking enabled, and Qwen's own recommended thinking-mode sampling
+# settings for the rest).
+
+exp_name: "local_gpqa_diamond"
+
+# --------------------------------------------------------------------------
+# Model / server — point this at whatever vLLM is currently serving.
+# scripts/run_pipeline.py overwrites model_name at runtime to the restored
+# checkpoint directory; edit here only for manual runs.
+# --------------------------------------------------------------------------
+model_name: "Qwen/Qwen3.5-4B"
+
+vllm_base_url: "http://localhost:8000/v1"
+api_key: "EMPTY"
+request_timeout: 7200
+max_concurrency: 4
+
+# --------------------------------------------------------------------------
+# Dataset — populated by pipeline/setup_dataset.py. GPQA Diamond is a
+# TA-side placeholder (not the real math-domain benchmark, per the TAs) —
+# swap dataset_path once a math-specific eval config is published.
+# --------------------------------------------------------------------------
+dataset_path: "datasets/gpqa_diamond"
+
+# Cap examples for a quick smoke test; raise for a full local run.
+limit: 20
+
+math_instruction: |
+  Answer the following multiple-choice question. Reason carefully, but keep
+  the reasoning concise. After reasoning, output the final answer on its own
+  last line using exactly this format: \boxed{X} where X is one of (A, B, C, D).
+  Do not write anything after that line. Example last line: \boxed{A}.
+
+# --------------------------------------------------------------------------
+# Sampling / decoding — verbatim from the TA repo's config.yaml
+# --------------------------------------------------------------------------
+max_new_tokens: 32000
+temperature: 1.0
+top_p: 0.95
+top_k: 20
+min_p: 0.0
+presence_penalty: 1.5
+repetition_penalty: 1.0
+enable_thinking: true
+
+# --------------------------------------------------------------------------
+# Output
+# --------------------------------------------------------------------------
+output: "results/local_gpqa_diamond.json"

@@ -1,14 +1,23 @@
 [project]
-name = "efficient-ai-cs6013"
+name = "cs6013-efficient-ai"
 version = "0.1.0"
-description = "CS6013 Fall 2026 Efficient AI: model compression submissions and evaluation (GPQA Diamond + MMLU-Pro)"
+description = "CS6013 Fall 2026 Efficient AI: model compression pipeline (dataset setup, size check, local eval against the TA harness)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "accelerate>=1.14.0",
-    "datasets>=5.0.0",
-    "torch>=2.11.0",
-    "transformers>=5.13.0",
+    "torch==2.12.1",
+    "transformers==5.16.1",
+    "accelerate==1.14.0",
+    "datasets==5.0.1",
+    "huggingface-hub==1.29.0",
+    "peft==0.18.0",
+    "optimum==2.3.0",
+    "gptqmodel==7.3.2",
+    "openai>=3.0.0",
+    "pyyaml>=6.0",
+    # vllm is intentionally not pinned here -- install separately per its
+    # own instructions (CUDA-version-specific wheel); see pipeline/README
+    # or the TA eval repo's own serving instructions.
 ]
 
 [build-system]
@@ -16,5 +25,5 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["evaluation*"]
-exclude = ["evaluation.results*"]
+include = ["pipeline*"]
+exclude = ["pipeline.results*"]

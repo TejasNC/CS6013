@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Datasets (gated / large; regenerate with pipeline/setup_dataset.py)
+datasets/
+
+# Model checkpoints and eval outputs
+*.pt
+*.safetensors
+restored_hf/
+results/
+.cache/
+
+# Misc
+.DS_Store
