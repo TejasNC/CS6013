@@ -99,7 +99,7 @@ def main():
     boosted = {i for v in best.values() for _, i in sorted(v)[:a.shortest_per_problem]}
     data, val = [], []
     for i, ((ids, plen), r) in enumerate(zip(seqs, recs)):
-        item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop")
+        item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop" and len(ids) < a.maxlen)  # end/answer-tail weights only if the trace was not cut by --maxlen
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
     print(f"KD data: {len(data)} train seqs ({sum(1 for d in data if d[2] > 1)} boosted x{a.w_short}) from {len(probs) - len(val_probs)} problems, "
           f"{sum(len(d[0]) for d in data)} tokens; val {len(val)} seqs from {len(val_probs)} problems", flush=True)
