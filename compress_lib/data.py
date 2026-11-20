@@ -55,21 +55,24 @@ LEGACY_INSTR = ("Solve the following math problem. Reason step by step, and put 
                 "answer within \\boxed{}. Write only the final answer inside the box.")
 
 
-def tokenize(rec, tok, probs, max_len):
+def tokenize(rec, tok, probs, max_len, tail=False):
     msg = [{"role": "user", "content": f"{LEGACY_INSTR if rec['src'].startswith('teacher_old_') else _instr()}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
     p = tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True)
     pid = tok(p, add_special_tokens=False).input_ids
     rid = tok(rec["text"], add_special_tokens=False).input_ids
     if rec["finish"] == "stop":  # truncated (capped) traces have no end token
         rid = rid + [tok.convert_tokens_to_ids("<|im_end|>")]
-    ids = (pid + rid)[:max_len]
+    if tail and len(pid) + len(rid) > max_len:  # keep the prompt and the LAST tokens of the response (ends at </think> + answer)
+        ids = pid + rid[len(rid) - (max_len - len(pid)):]
+    else:
+        ids = (pid + rid)[:max_len]
     return torch.tensor(ids), len(pid)
 
 
 SLICE_FILE = RUNS / "kl_slice_v1.json"
 
 
-def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False, include_unfinished: bool = False):
+def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False, include_unfinished: bool = False, tail: bool = False):
     """split 'kl' uses a FROZEN slice (kl_slice_v1.json, created on first use) so KL numbers stay comparable across runs."""
     probs = problems(); recs = load_records(include_unfinished=include_unfinished)
     if split == "kl" and SLICE_FILE.exists():
@@ -86,5 +89,5 @@ def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_on
             SLICE_FILE.write_text(json.dumps([[r["src"], r["id"], r["k"]] for r in recs[:max_seqs]]))
         keep = {tuple(x) for x in json.loads(SLICE_FILE.read_text())}
         recs = [r for r in recs if (r["src"], r["id"], r["k"]) in keep]
-    out = [tokenize(r, tok, probs, max_len) for r in recs[:max_seqs]]
+    out = [tokenize(r, tok, probs, max_len, tail) for r in recs[:max_seqs]]
     return out, recs[:max_seqs]

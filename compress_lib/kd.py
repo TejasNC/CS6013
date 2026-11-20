@@ -81,6 +81,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--w-short", type=float, default=2.5); ap.add_argument("--val-problems", type=int, default=3)
     ap.add_argument("--val-every", type=int, default=1800)
+    ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
+    ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
     dev = "cuda"; random.seed(a.seed); torch.manual_seed(a.seed)
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
@@ -101,6 +103,15 @@ def main():
     for i, ((ids, plen), r) in enumerate(zip(seqs, recs)):
         item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop" and len(ids) < a.maxlen)  # end/answer-tail weights only if the trace was not cut by --maxlen
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
+    if a.end_windows:  # arm B: windows that land on the real </think> and answer (prompt + last tokens), end weights apply there
+        tseqs, trecs = build("cal", tok, a.maxlen, None, include_unfinished=True, tail=True)
+        tk = [i for i, r in enumerate(trecs) if not r["src"].startswith("teacher_old_")]
+        tseqs, trecs = [tseqs[i] for i in tk], [trecs[i] for i in tk]
+        n_end = 0
+        for (ids, plen), r in zip(tseqs, trecs):
+            if r["finish"] == "stop" and r["correct"] and (r["src"], r["id"]) not in val_probs:
+                data.append((ids, plen, a.w_short if r["ntok"] <= 20000 else 1.0, True)); n_end += 1
+        print(f"added {n_end} end-window sequences (prompt + last tokens, maxlen {a.maxlen})", flush=True)
     print(f"KD data: {len(data)} train seqs ({sum(1 for d in data if d[2] > 1)} boosted x{a.w_short}) from {len(probs) - len(val_probs)} problems, "
           f"{sum(len(d[0]) for d in data)} tokens; val {len(val)} seqs from {len(val_probs)} problems", flush=True)
     end_id = tok.convert_tokens_to_ids("</think>")
@@ -112,6 +123,11 @@ def main():
     S.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})  # frozen embeddings: reentrant ckpt would give LoRA no grads
     S.config.use_cache = False
     lora = add_lora(S, a.rank, a.alpha)
+    if a.init_adapters:
+        ad = torch.load(a.init_adapters, map_location="cpu")
+        for n, l in lora.items():
+            d = ad[hf_to_ckpt_name(n)]; l.A.data.copy_(d["A"]); l.B.data.copy_(d["B"])
+        print("warm-started from", a.init_adapters, flush=True)
     params = [p for l in lora.values() for p in (l.A, l.B)]
     print(f"LoRA r={a.rank} on {len(lora)} matrices, {sum(p.numel() for p in params)/1e6:.2f}M params", flush=True)
     opt = torch.optim.AdamW(params, lr=a.lr, weight_decay=0.0, betas=(0.9, 0.99))
