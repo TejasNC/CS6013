@@ -239,13 +239,19 @@ def restore_model(comp_dir: str, out_dir: str, dev: str = "cuda", log=print):
     out: dict[str, torch.Tensor] = {}
     groups: dict[str, dict] = {}
     for k, v in raw.items():
-        m = re.match(r"^(.*\.weight)(\.rans|\.cnt|\.scale|\.meta)$", k)
+        m = re.match(r"^(.*\.weight)(\.rans|\.cnt|\.scale|\.meta|\.lora_A|\.lora_As|\.lora_B|\.lora_Bs)$", k)
         if m and not k.startswith("embed."):
             groups.setdefault(m.group(1), {})[m.group(2)] = v
         elif not k.startswith("embed."):
             out[k] = v
+    lscale = manifest.get("lora_scale")
     for name, t in groups.items():
-        out[name] = _dequant_matrix(t, name, dev).bfloat16().cpu()
+        W = _dequant_matrix(t, name, dev)
+        if ".lora_A" in t:  # int8 adapters: W += scale * B @ A in fp32
+            A = t[".lora_A"].to(dev).float() * t[".lora_As"].to(dev).float().unsqueeze(1)
+            B = t[".lora_B"].to(dev).float() * t[".lora_Bs"].to(dev).float().unsqueeze(1)
+            W = W + lscale * (B @ A)
+        out[name] = W.bfloat16().cpu()
     V, d = manifest["embed_shape"]
     out[EMBED] = restore_embedding({k: v for k, v in raw.items() if k.startswith("embed.")}, V, d, dev)
     for name, (shape, dt) in manifest["dropped"].items():
