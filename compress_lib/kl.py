@@ -32,11 +32,14 @@ if __name__ == "__main__":
     ap.add_argument("--teacher", required=True); ap.add_argument("--student", required=True)
     ap.add_argument("--maxlen", type=int, default=6144); ap.add_argument("--nseq", type=int, default=48)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--orig-embed", action="store_true", help="diagnostic: copy the teacher embedding/lm_head into the student")
     a = ap.parse_args(); dev = "cuda"
     tok = AutoTokenizer.from_pretrained(a.teacher)
     seqs, recs = build("kl", tok, a.maxlen, a.nseq)
     T = AutoModelForCausalLM.from_pretrained(a.teacher, dtype=torch.bfloat16, device_map=dev).eval()
     S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map=dev).eval()
+    if a.orig_embed:
+        S.model.embed_tokens.weight.data.copy_(T.model.embed_tokens.weight.data); print("student embedding replaced by teacher (diagnostic)")
     t = time.time(); kl, n, per = kl_eval(T, S, seqs)
     print(f"KL {kl:.5f} over {n} tokens, {len(seqs)} seqs ({time.time()-t:.0f}s)")
     if a.json: json.dump(dict(kl=kl, tokens=n, per_seq=per), open(a.json, "w"))

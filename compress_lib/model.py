@@ -137,9 +137,15 @@ def _kmeans(X: torch.Tensor, K: int, iters: int = 15, seed: int = 0):
 
 
 def compress_embedding(E: torch.Tensor, counts: np.ndarray, n1: int, n2: int, b1: float, b2: float, K: int, dev: str,
-                       special_ids: list[int]):
+                       special_ids: list[int], rank: str = "count"):
+    """rank='count': most frequent calibration tokens first (ties by id). rank='id': pure token-id order (BPE merge order
+    ~ frequency; robust when calibration counts are thin) with calibration-seen tokens still promoted into T1/T2."""
     V, d = E.shape
-    order = np.argsort(-counts.astype(np.float64), kind="stable")
+    if rank == "id":
+        key = np.where(counts > 0, -1e12 + np.arange(V), np.arange(V)).astype(np.float64)  # seen tokens first (by id), then by id
+        order = np.argsort(key, kind="stable")
+    else:
+        order = np.argsort(-counts.astype(np.float64), kind="stable")
     # special / template tokens always go to tier 1
     sp = set(special_ids)
     order = np.array([i for i in order if i in sp] + [i for i in order if i not in sp])

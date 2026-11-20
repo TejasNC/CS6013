@@ -1,0 +1,23 @@
+{
+ "bits": {
+  "attn.a": 3.0,
+  "attn.b": 3.0,
+  "attn.c": 3.0,
+  "dnet.a": 2.0,
+  "dnet.b": 2.0,
+  "dnet.c": 2.0,
+  "ffn_gu.a": 1.46,
+  "ffn_gu.b": 1.46,
+  "ffn_gu.c": 1.46,
+  "ffn_down.a": 1.46,
+  "ffn_down.b": 1.46,
+  "ffn_down.c": 1.46
+ },
+ "embed": {
+  "n1": 16384,
+  "n2": 81920,
+  "b1": 4.0,
+  "b2": 1.0,
+  "K": 1024
+ }
+}

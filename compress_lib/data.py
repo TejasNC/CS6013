@@ -55,10 +55,19 @@ def tokenize(rec, tok, probs, max_len):
     return torch.tensor(ids), len(pid)
 
 
+SLICE_FILE = RUNS / "kl_slice_v1.json"
+
+
 def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False):
+    """split 'kl' uses a FROZEN slice (kl_slice_v1.json, created on first use) so KL numbers stay comparable across runs."""
     probs = problems(); recs = load_records()
     recs = [r for r in recs if is_heldout(r) == (split == "kl")]
     if correct_only: recs = [r for r in recs if r["correct"]]
-    recs.sort(key=lambda r: (r["id"], r["k"]))
+    recs.sort(key=lambda r: (r["src"], r["id"], r["k"]))
+    if split == "kl":
+        if not SLICE_FILE.exists():
+            SLICE_FILE.write_text(json.dumps([[r["src"], r["id"], r["k"]] for r in recs[:max_seqs]]))
+        keep = {tuple(x) for x in json.loads(SLICE_FILE.read_text())}
+        recs = [r for r in recs if (r["src"], r["id"], r["k"]) in keep]
     out = [tokenize(r, tok, probs, max_len) for r in recs[:max_seqs]]
     return out, recs[:max_seqs]
