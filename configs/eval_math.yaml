@@ -1,0 +1,34 @@
+# Local math eval (HMMT Feb 2025 + AIME 2025). Used by pipeline/run_math_eval.py.
+# Sampling/decoding values are identical to configs/eval_config.yaml (copied from
+# the TA repo's config.yaml). Prompt wording is OURS: the TAs have not published
+# the real math prompt, so this is Qwen's standard "boxed answer" instruction.
+
+exp_name: "local_math_eval"
+model_name: "Qwen/Qwen3.5-4B"   # must match the model name/path the vLLM server serves
+vllm_base_url: "http://localhost:8000/v1"
+api_key: "EMPTY"
+request_timeout: 7200
+max_concurrency: 16
+
+# Produced by: python pipeline/setup_math_dataset.py
+dataset_path: "datasets/math_eval"
+
+# Samples per problem. Local numbers are noisy at ~60 problems, so use >=4 for
+# comparing recipes; use --limit / --sources for quick screening.
+samples: 4
+limit: null
+
+math_instruction: |
+  Solve the following math problem. Reason step by step, and put your final
+  answer within \boxed{}. Write only the final answer inside the box.
+
+max_new_tokens: 32000
+temperature: 1.0
+top_p: 0.95
+top_k: 20
+min_p: 0.0
+presence_penalty: 1.5
+repetition_penalty: 1.0
+enable_thinking: true
+
+output: "results/local_math_eval.json"

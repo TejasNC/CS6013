@@ -19,3 +19,12 @@ when orchestrating a submission; edit them by hand only for one-off manual
 `dataset_path` points at whatever `pipeline/setup_dataset.py` produced
 locally. If you re-run dataset setup with a different `--out-dir`, update
 this to match.
+
+## `eval_math.yaml`
+
+Config for `pipeline/run_math_eval.py` (HMMT Feb 2025 + AIME 2025, our own
+`\boxed{}` math grading in `pipeline/math_grading.py`). Sampling values are
+identical to `eval_config.yaml`; only the prompt wording and `samples` are
+ours (the TAs have not published the real math prompt). Dataset comes from
+`pipeline/setup_math_dataset.py`. Untested against a live vLLM server as of
+creation — smoke-test with `--limit 2 --samples 1` first.
