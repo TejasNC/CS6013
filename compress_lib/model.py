@@ -80,13 +80,14 @@ def _quant_matrix(W: torch.Tensor, name: str, bits: float, H: torch.Tensor | Non
     std = Wp.std(dim=1).clamp_min(1e-6)
     alpha = alpha_for_rate(Wp, bits)
     for it in range(2 if (refine and Hp is not None) else 1):
-        delta = std * alpha
+        delta = (std * alpha).clamp_min(1e-4).half().float()  # fp16-exact step, so GPTQ sees what restore will use
         Q = gptq_uniform(Wp, Hp, delta)
         eb = entropy_bits(Q)
         if abs(eb - bits) < 0.02 or Hp is None:
             break
         alpha *= 2 ** (eb - bits)  # entropy ~ -log2(step)
     delta16 = delta.half()
+    assert torch.equal(delta16.float(), delta)
     Wq = Q.float() * delta16.float().unsqueeze(1)
     Wr = unrotate_in(Wq, name)
     rel = ((Wr - W.to(dev).float()).norm() / W.to(dev).float().norm()).item()
@@ -206,7 +207,9 @@ def compress_model(model_dir: str, out_dir: str, plan: dict, hessians: dict | No
             manifest["embed_shape"] = list(W.shape)
             e = plan["embed"]
             sp = list(range(248044 - 0, 248070))  # special / chat-template token ids region (filtered below)
-            counts = tok_counts if tok_counts is not None else np.ones(W.shape[0])
+            if tok_counts is None:
+                raise ValueError("embedding tiering needs token counts (--counts); refusing to tier by arbitrary order")
+            counts = tok_counts
             q, st = compress_embedding(W, counts, e["n1"], e["n2"], e["b1"], e["b2"], e["K"], dev, [i for i in sp if i < W.shape[0]])
             tensors.update(q)
             stats["embed"] = st
