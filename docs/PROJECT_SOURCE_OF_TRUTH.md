@@ -36,24 +36,23 @@ Every student submits for both Track 1 and Track 2; Track 2+ is optional. Compre
 - **Knowledge distillation:** originally listed as ineligible; **the rules have since changed** (per Tejas, 2026-11-20) and all techniques are now allowed, including distillation. Distillation is only worthwhile from the *unquantized* `Qwen/Qwen3.5-4B` teacher into the compressed student. Not yet confirmed in writing by the TAs — re-verify against the course page before relying on it.
 - **Entropy / lossless coding of stored tensors:** believed allowed (Tejas, 2026-11-20: only state-dict size matters), but the TA repo's "Check Compression" section still reads "Will update soon" (checked 2026-11-20), so how size is measured is **unconfirmed**. Ask the TAs before relying on it.
 
-## 3. Compression % — Working Formula
+## 3. Compression % — Size Rule (from the TAs' MidSem script)
 
-The TAs' own "Check Compression" script is not yet published (their repo's README says "Will update soon," confirmed by pulling the full repo — no size-checking code exists anywhere in it). Until they publish one, use this as the working formula:
+Found 2026-11-20 in the eval repo (`lavinianongbri/cs6013`, commit `0a7f1840`, folder `CS6013Fall_ProjectEvalMidSemScript/`: `measure_checkpoint_bits.py`, `eval_common.sh`, `ensure_visual_zero.py`). The README's "Check Compression: Will update soon" is stale. **Not yet confirmed that the final evaluation uses this script unchanged.**
 
-> **Compression % = size(compressed state dict) / size(original state dict) × 100**, where `size(state dict) = Σ over all tensors of numel(tensor) × itemsize(tensor.dtype)` — raw parameter byte-count at each tensor's actual stored dtype (not a serialized file size, no headers/metadata, no gzip).
-
-```python
-def state_dict_size_bytes(state_dict) -> int:
-    return sum(t.numel() * t.element_size() for t in state_dict.values())
-
-target_bytes = 0.10 * state_dict_size_bytes(original_state_dict)   # for a "10%" submission
+```
+bits(tensor)  = numel * element_size * 8            # stored dtype
+size_text_GiB = sum(bits over non-vision tensors) / 8 / 2**30
+size_frac     = size_text_GiB / 8.0585              # hard-coded original text-tower GiB
 ```
 
-- **Baseline:** compute `original_state_dict` from the **full `Qwen/Qwen3.5-4B` checkpoint as downloaded, including the vision tower** — not a pre-pruned, text-only version. This means ViT pruning genuinely counts toward your 10/20/40% budget rather than being done "for free" before the baseline is drawn.
-- **Blind spot:** magnitude pruning (zeroing weights, same shape/dtype) doesn't move this number at all — `numel` and `dtype` are unchanged.
-- **GPTQ/packed formats:** sum the actual stored tensors (`qweight`, `qzeros`, `scales`, `g_idx`, ...) rather than naively computing "4 bits × original numel" — quantization metadata adds bytes back.
-
-This is our own working assumption for planning and self-evaluation, not TA-confirmed — revisit if/when they publish their own method.
+- Measured on the **safetensors files of the downloaded HF checkpoint**, not the restored model and not on-disk file size. Tokenizer/config files do not count.
+- **Vision tower is free:** tensors whose name contains `visual.` (or a path segment `visual`/`vision`/`vision_tower`/`vision_model`) are excluded, and `ensure_visual_zero.py` zeroes them before decompress runs. `decompress.py` must still output a complete, loadable checkpoint.
+- **Budgets:** 20% ≤ 1.6117 GiB, 10% ≤ 0.8059 GiB (≈ 3.2 and 1.6 average bits per original text weight). Keep a safety margin.
+- **Entropy-coded / bit-packed blobs** stored as `uint8` count at 8 bits per element, so they are allowed. Packed codes, scales, zero-points, codebooks and index tensors all count at stored size. Tied embeddings / `lm_head` count as text.
+- A DEFLATE `.czip` container is only measured when no safetensors exist.
+- Eval: vLLM `--dtype bfloat16`, max-model-len 33000, in the submitter's own `uv sync` venv.
+- `pipeline/size_check.py` implements this (header-only parse, no torch).
 
 ## 4. Timeline & Weightage
 

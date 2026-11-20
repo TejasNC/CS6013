@@ -37,11 +37,7 @@ targets (10%/20%/40% of original size).
    need a fix, prefer patching around them (or re-diffing against upstream)
    over rewriting their internals, so it stays obvious what came from the
    TAs vs. what's ours.
-5. **The compression-% formula in `pipeline/size_check.py` is our own
-   working assumption**, not TA-confirmed (their own "Check Compression"
-   script is unpublished as of the last check — see source-of-truth doc
-   §3). Don't treat its output as gospel; treat it as the best local
-   estimate we have.
+5. **Compression-% follows the TAs' MidSem script** (text-tower safetensors bits / 8.0585 GiB, vision tower excluded; see source-of-truth doc §3). Implemented in `pipeline/size_check.py`. Still unconfirmed whether the final evaluation uses it unchanged.
 6. **Vision-tower pruning (`compression/vision_prune.py`,
    `compress.py --prune-vision`) is experimental and off by default.**
    Whether a vision-pruned checkpoint still loads through vLLM's
@@ -82,5 +78,5 @@ python pipeline/setup_dataset.py
 ## Current known gaps (don't silently resolve these — flag them)
 
 - Whether `23B0932/Week01/Track1_10/Submission01` has been submitted (blocks migrating it to the new folder convention).
-- The compression-% formula (§3 of the source-of-truth doc) is unconfirmed by the TAs.
+- Whether the final evaluation uses the MidSem size script (§3 of the source-of-truth doc) unchanged.
 - Whether the Track distinction needs to be encoded somewhere machine-readable beyond each submission's own README (see `23B0932/CLAUDE.md`).

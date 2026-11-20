@@ -1,132 +1,104 @@
 #!/usr/bin/env python3
-"""Self-evaluate a compressed checkpoint's size against the working formula.
+"""Measure a compressed checkpoint the way the TAs' MidSem script does.
 
-The TAs have not yet published their official "Check Compression" script
-(their eval repo's README still says "Will update soon" as of this check).
-Until they do, this implements our own working assumption, documented in
-the project source-of-truth doc:
+Source: `CS6013Fall_ProjectEvalMidSemScript/measure_checkpoint_bits.py` and
+`eval_common.sh` in https://github.com/lavinianongbri/cs6013 (commit 0a7f1840,
+read 2026-11-20). Not yet confirmed that the FINAL evaluation uses it unchanged.
 
-    compression % = size(compressed state dict) / size(original state dict) * 100
-    size(state dict) = sum over all tensors of numel(tensor) * itemsize(tensor.dtype)
+    bits(tensor)   = numel * element_size * 8        (stored dtype, e.g. uint8 blobs = 8 bits)
+    size_text_GiB  = sum of bits over all tensors NOT in the vision tower / 8 / 2**30
+    size_frac      = size_text_GiB / 8.0585          (hard-coded original text-tower GiB)
 
-i.e. raw parameter byte-count at each tensor's actual stored dtype — not a
-serialized file size (no safetensors headers/metadata, no gzip). The
-baseline is the FULL Qwen/Qwen3.5-4B checkpoint as downloaded (vision tower
-included), so pruning the vision tower counts toward your compression
-budget rather than being done "for free" before the baseline is drawn.
+A tensor is "visual" if its name contains "visual." or has a path segment in
+{visual, vision, vision_tower, vision_model}; visual tensors are NOT counted
+(the TA harness zeroes them before decompress). Tokenizer/config files do not
+count. Tied embeddings / lm_head count as text.
+
+This reads safetensors headers only (pure Python, no torch needed), so it can
+run on the HF-repo folder exactly as it would be submitted.
+
+Targets: 20% -> <= 1.6117 GiB, 10% -> <= 0.8059 GiB. Keep a safety margin.
 
 Usage
 -----
-    # Against the live default baseline (downloads Qwen/Qwen3.5-4B once):
-    python pipeline/size_check.py --compressed path/to/compressed.pt
-
-    # Against an HF checkpoint directory instead of a torch.save .pt file:
-    python pipeline/size_check.py --compressed path/to/restored_hf_dir
-
-    # Cache the baseline size so repeated runs don't re-download the model:
-    python pipeline/size_check.py --compressed compressed.pt --baseline-cache baseline_bytes.txt
+    python pipeline/size_check.py --compressed path/to/hf_checkpoint_dir
+    python pipeline/size_check.py --compressed path/to/dir --json
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import struct
 from pathlib import Path
-from typing import Mapping
 
-import torch
+ORIGINAL_TEXT_GIB = 8.0585  # from eval_common.sh (ORIGINAL_TEXT_GB)
 
-
-def state_dict_size_bytes(state_dict: Mapping[str, torch.Tensor]) -> int:
-    """Sum of numel * itemsize over every tensor in the state dict."""
-    total = 0
-    for tensor in state_dict.values():
-        if isinstance(tensor, torch.Tensor):
-            total += tensor.numel() * tensor.element_size()
-    return total
-
-
-def size_of_path(path: Path) -> int:
-    """Compute state-dict size for either a torch.save .pt file or an HF checkpoint dir."""
-    if path.is_file():
-        payload = torch.load(path, map_location="cpu", weights_only=False)
-        state_dict = payload["state_dict"] if isinstance(payload, dict) and "state_dict" in payload else payload
-        if not isinstance(state_dict, dict):
-            raise ValueError(f"Could not find a state_dict in {path}")
-        return state_dict_size_bytes(state_dict)
-
-    if path.is_dir():
-        # HF checkpoint directory: load via transformers so dtype casts,
-        # tied weights, and safetensors sharding are all handled correctly
-        # rather than re-implemented here.
-        from transformers import AutoModelForCausalLM
-
-        model = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True)
-        size = state_dict_size_bytes(model.state_dict())
-        del model
-        return size
-
-    raise FileNotFoundError(path)
+# safetensors dtype -> bits
+DTYPE_BITS = {
+    "F64": 64, "I64": 64, "U64": 64,
+    "F32": 32, "I32": 32, "U32": 32,
+    "F16": 16, "BF16": 16, "I16": 16, "U16": 16,
+    "F8_E4M3": 8, "F8_E5M2": 8, "I8": 8, "U8": 8, "BOOL": 8,
+}
+VISUAL_SEGMENTS = {"visual", "vision", "vision_tower", "vision_model"}
 
 
-def baseline_size_bytes(model_name: str, cache_path: Path | None) -> int:
-    if cache_path is not None and cache_path.is_file():
-        cached = int(cache_path.read_text().strip())
-        print(f"[baseline] using cached size from {cache_path}: {cached:,} bytes")
-        return cached
-
-    from transformers import AutoModelForCausalLM
-
-    print(f"[baseline] loading {model_name} to compute original size (one-time)...")
-    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-    size = state_dict_size_bytes(model.state_dict())
-    del model
-
-    if cache_path is not None:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(str(size))
-        print(f"[baseline] cached to {cache_path}")
-
-    return size
+def is_visual(name: str) -> bool:
+    return "visual." in name or any(seg in VISUAL_SEGMENTS for seg in name.split("."))
 
 
-def fmt_bytes(n: int) -> str:
-    return f"{n:,} bytes ({n / 1024**3:.4f} GiB)"
+def tensor_bits(path: Path):
+    """Yield (name, bits) for every tensor in one .safetensors file."""
+    with path.open("rb") as f:
+        (n,) = struct.unpack("<Q", f.read(8))
+        header = json.loads(f.read(n))
+    for name, meta in header.items():
+        if name == "__metadata__":
+            continue
+        numel = 1
+        for d in meta["shape"]:
+            numel *= d
+        yield name, numel * DTYPE_BITS[meta["dtype"]]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--compressed",
-        type=Path,
-        required=True,
-        help="Path to the compressed checkpoint (.pt state_dict, or an HF checkpoint dir)",
-    )
-    parser.add_argument(
-        "--baseline-model",
-        default="Qwen/Qwen3.5-4B",
-        help="Original model id used as the 100%% baseline",
-    )
-    parser.add_argument(
-        "--baseline-cache",
-        type=Path,
-        default=None,
-        help="Optional file to cache the baseline byte count in, to skip re-downloading",
-    )
-    return parser.parse_args()
+def measure(ckpt_dir: Path) -> dict:
+    files = sorted(ckpt_dir.glob("*.safetensors"))
+    if not files:
+        raise FileNotFoundError(f"no *.safetensors in {ckpt_dir}")
+    text_bits = visual_bits = 0
+    for fp in files:
+        for name, bits in tensor_bits(fp):
+            if is_visual(name):
+                visual_bits += bits
+            else:
+                text_bits += bits
+    text_gib = text_bits / 8 / 2**30
+    return {
+        "text_gib": text_gib,
+        "visual_gib": visual_bits / 8 / 2**30,
+        "size_frac": text_gib / ORIGINAL_TEXT_GIB,
+        "avg_bits_per_original_weight": 16 * text_gib / ORIGINAL_TEXT_GIB,
+    }
 
 
 def main() -> None:
-    args = parse_args()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--compressed", type=Path, required=True, help="HF checkpoint dir with *.safetensors")
+    ap.add_argument("--json", action="store_true")
+    # Accepted but ignored, so older callers (run_pipeline.py) keep working.
+    ap.add_argument("--baseline-model", default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--baseline-cache", default=None, help=argparse.SUPPRESS)
+    args = ap.parse_args()
 
-    original_bytes = baseline_size_bytes(args.baseline_model, args.baseline_cache)
-    compressed_bytes = size_of_path(args.compressed)
-
-    pct = 100.0 * compressed_bytes / original_bytes
-
-    print()
-    print(f"Original  ({args.baseline_model}): {fmt_bytes(original_bytes)}")
-    print(f"Compressed ({args.compressed}):    {fmt_bytes(compressed_bytes)}")
-    print(f"Compression %: {pct:.2f}%  (target buckets: 10% / 20% / 40%)")
+    r = measure(args.compressed)
+    if args.json:
+        print(json.dumps(r))
+        return
+    print(f"Text tower:   {r['text_gib']:.4f} GiB (counted)")
+    print(f"Vision tower: {r['visual_gib']:.4f} GiB (not counted)")
+    print(f"size_frac = {r['text_gib']:.4f} / {ORIGINAL_TEXT_GIB} = {100 * r['size_frac']:.2f}%")
+    print("Budgets: 20% <= 1.6117 GiB, 10% <= 0.8059 GiB (keep a margin)")
 
 
 if __name__ == "__main__":
