@@ -24,14 +24,14 @@ def is_heldout(rec) -> bool:
     return zlib.crc32(f"{rec['id']}|{rec['k']}|{rec.get('src','')}".encode()) % 5 == 0
 
 
-def load_records(files=None):
+def load_records(files=None, include_unfinished=False):
     files = files or sorted(RUNS.glob("teacher_*.jsonl"))
     recs = []
     for f in files:
         src = Path(f).stem
         for l in open(f):
             r = json.loads(l); r["src"] = src
-            if "text" in r and r["finish"] == "stop" and r["closed_think"]:
+            if "text" in r and ((r["finish"] == "stop" and r["closed_think"]) or (include_unfinished and r["finish"] == "length")):
                 recs.append(r)
     return recs
 
@@ -59,7 +59,9 @@ def tokenize(rec, tok, probs, max_len):
     msg = [{"role": "user", "content": f"{LEGACY_INSTR if rec['src'].startswith('teacher_old_') else _instr()}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
     p = tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True)
     pid = tok(p, add_special_tokens=False).input_ids
-    rid = tok(rec["text"], add_special_tokens=False).input_ids + [tok.convert_tokens_to_ids("<|im_end|>")]
+    rid = tok(rec["text"], add_special_tokens=False).input_ids
+    if rec["finish"] == "stop":  # truncated (capped) traces have no end token
+        rid = rid + [tok.convert_tokens_to_ids("<|im_end|>")]
     ids = (pid + rid)[:max_len]
     return torch.tensor(ids), len(pid)
 
@@ -67,9 +69,9 @@ def tokenize(rec, tok, probs, max_len):
 SLICE_FILE = RUNS / "kl_slice_v1.json"
 
 
-def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False):
+def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False, include_unfinished: bool = False):
     """split 'kl' uses a FROZEN slice (kl_slice_v1.json, created on first use) so KL numbers stay comparable across runs."""
-    probs = problems(); recs = load_records()
+    probs = problems(); recs = load_records(include_unfinished=include_unfinished)
     if split == "kl" and SLICE_FILE.exists():
         pass  # frozen slice: membership comes from the file only
     else:
