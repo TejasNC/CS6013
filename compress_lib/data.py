@@ -17,8 +17,10 @@ def _instr():
 def is_heldout(rec) -> bool:
     """KL slice = every hmmt_feb_50 sample (the official eval problems, never trained/calibrated on) plus ~20% of
     local HMMT-2025 samples. Calibration / Hessians / Fisher / KD use ONLY the remaining local-2025 samples."""
-    if rec.get("src") == "teacher_hmmt_feb_50":
+    if "feb_50" in rec.get("src", ""):
         return True
+    if rec.get("src", "").startswith("teacher_old_"):  # legacy-prompt traces: only used for the frozen KL slice v1
+        return zlib.crc32(f"{rec['id']}|{rec['k']}|{rec['src']}".encode()) % 5 == 0
     return zlib.crc32(f"{rec['id']}|{rec['k']}|{rec.get('src','')}".encode()) % 5 == 0
 
 
@@ -41,6 +43,7 @@ def problems():
     for name in ("hmmt_feb_50", "hmmt_2025_local"):  # HMMT only; AIME deliberately absent
         for r in load(name):
             d[(name_to_src(name), r["id"])] = r["problem"]
+            d[(name_to_src(name).replace("teacher_", "teacher_old_"), r["id"])] = r["problem"]
     return d
 
 
@@ -48,8 +51,12 @@ def name_to_src(name):
     return {"hmmt_feb_50": "teacher_hmmt_feb_50", "hmmt_2025_local": "teacher_hmmt_2025_local"}[name]
 
 
+LEGACY_INSTR = ("Solve the following math problem. Reason step by step, and put your final\n"
+                "answer within \\boxed{}. Write only the final answer inside the box.")
+
+
 def tokenize(rec, tok, probs, max_len):
-    msg = [{"role": "user", "content": f"{_instr()}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
+    msg = [{"role": "user", "content": f"{LEGACY_INSTR if rec['src'].startswith('teacher_old_') else _instr()}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
     p = tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True)
     pid = tok(p, add_special_tokens=False).input_ids
     rid = tok(rec["text"], add_special_tokens=False).input_ids + [tok.convert_tokens_to_ids("<|im_end|>")]
@@ -63,7 +70,10 @@ SLICE_FILE = RUNS / "kl_slice_v1.json"
 def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_only: bool = False):
     """split 'kl' uses a FROZEN slice (kl_slice_v1.json, created on first use) so KL numbers stay comparable across runs."""
     probs = problems(); recs = load_records()
-    recs = [r for r in recs if is_heldout(r) == (split == "kl")]
+    if split == "kl" and SLICE_FILE.exists():
+        pass  # frozen slice: membership comes from the file only
+    else:
+        recs = [r for r in recs if is_heldout(r) == (split == "kl")]
     if correct_only: recs = [r for r in recs if r["correct"]]
     recs.sort(key=lambda r: (r["src"], r["id"], r["k"]))
     if split == "kl":
