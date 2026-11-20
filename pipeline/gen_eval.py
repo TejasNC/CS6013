@@ -14,8 +14,9 @@ from common import extract_boxed_answer
 from math_grading import is_equiv
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTR = ("Solve the following math problem. Reason step by step, and put your final\n"
-         "answer within \\boxed{}. Write only the final answer inside the box.")
+# Exact TA instruction (their sample-math config; the real HMMT prompt is unpublished): includes "keep the reasoning concise".
+import yaml
+INSTR = yaml.safe_load((ROOT / "ta_eval/CS6013Fall_ProjectEvalMidSemScript/configs/eval_config.yaml").read_text())["math_instruction"]
 
 
 def load(name):

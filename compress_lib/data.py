@@ -8,8 +8,10 @@ from pathlib import Path
 import torch
 
 RUNS = Path("/mnt/nas/tejaschaudhari/emir_data/runs")
-INSTR = ("Solve the following math problem. Reason step by step, and put your final\n"
-         "answer within \\boxed{}. Write only the final answer inside the box.")
+def _instr():
+    import sys; sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
+    from gen_eval import INSTR
+    return INSTR
 
 
 def is_heldout(rec) -> bool:
@@ -47,7 +49,7 @@ def name_to_src(name):
 
 
 def tokenize(rec, tok, probs, max_len):
-    msg = [{"role": "user", "content": f"{INSTR}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
+    msg = [{"role": "user", "content": f"{_instr()}\n\nProblem:\n{probs[(rec['src'], rec['id'])].strip()}"}]
     p = tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True)
     pid = tok(p, add_special_tokens=False).input_ids
     rid = tok(rec["text"], add_special_tokens=False).input_ids + [tok.convert_tokens_to_ids("<|im_end|>")]
