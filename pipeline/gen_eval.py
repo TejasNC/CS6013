@@ -7,7 +7,7 @@ Sampling params are otherwise identical to the TA config (temp 1.0, top_p .95, t
 
 usage: gen_eval.py --data hmmt_feb_50|aime_2025|hmmt_2025_local --k 4 --port 8000 --out file.jsonl [--keep-text]
 """
-import argparse, asyncio, json, sys, zlib
+import argparse, asyncio, json, os, sys, zlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import extract_boxed_answer
@@ -69,8 +69,11 @@ async def main():
     client = AsyncOpenAI(base_url=f"http://localhost:{a.port}/v1", api_key="EMPTY", timeout=7200)
     rows = load(a.data)
     sem = asyncio.Semaphore(a.conc)
+    done = set()
+    if os.path.exists(a.out):  # resume: skip (id, k) pairs already in the output file
+        done = {(json.loads(l)["id"], json.loads(l)["k"]) for l in open(a.out)}
     with open(a.out, "a") as f:
-        await asyncio.gather(*[one(client, sem, a.model, r, k, a, f) for r in rows for k in range(a.k)])
+        await asyncio.gather(*[one(client, sem, a.model, r, k, a, f) for r in rows for k in range(a.k) if (r["id"], k) not in done])
 
 
 if __name__ == "__main__":
