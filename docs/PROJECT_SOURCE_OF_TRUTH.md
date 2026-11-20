@@ -33,7 +33,8 @@ Every student submits for both Track 1 and Track 2; Track 2+ is optional. Compre
 
 **Technique eligibility:**
 - **Lossless compression** (gzip/zstd/etc. on top of a Track 1 submission) does **not** count toward Track 2 unless it comes with a real CUDA-speedup story — fine for Track 1, not Track-2-eligible on its own.
-- **Knowledge distillation is ineligible** as a compression technique for this project.
+- **Knowledge distillation:** originally listed as ineligible; **the rules have since changed** (per Tejas, 2026-11-20) and all techniques are now allowed, including distillation. Distillation is only worthwhile from the *unquantized* `Qwen/Qwen3.5-4B` teacher into the compressed student. Not yet confirmed in writing by the TAs — re-verify against the course page before relying on it.
+- **Entropy / lossless coding of stored tensors:** believed allowed (Tejas, 2026-11-20: only state-dict size matters), but the TA repo's "Check Compression" section still reads "Will update soon" (checked 2026-11-20), so how size is measured is **unconfirmed**. Ask the TAs before relying on it.
 
 ## 3. Compression % — Working Formula
 
