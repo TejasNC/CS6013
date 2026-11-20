@@ -84,6 +84,8 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     tok = AutoTokenizer.from_pretrained(a.teacher)
     seqs, recs = build("cal", tok, a.maxlen, None, correct_only=True)  # calibration split, correct traces only
+    keep = [i for i, r in enumerate(recs) if not r["src"].startswith("teacher_old_")]  # KD uses TA-prompt traces only
+    seqs, recs = [seqs[i] for i in keep], [recs[i] for i in keep]
     # keep the shortest few correct traces per problem
     by = {}
     for (ids, plen), r in zip(seqs, recs): by.setdefault((r["src"], r["id"]), []).append((r["ntok"], ids, plen))
@@ -95,7 +97,7 @@ def main():
     for p in T.parameters(): p.requires_grad_(False)
     S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map=dev)
     for p in S.parameters(): p.requires_grad_(False)
-    S.model.gradient_checkpointing_enable() if hasattr(S.model, "gradient_checkpointing_enable") else None
+    S.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})  # frozen embeddings: reentrant ckpt would give LoRA no grads
     S.config.use_cache = False
     lora = add_lora(S, a.rank, a.alpha)
     params = [p for l in lora.values() for p in (l.A, l.B)]

@@ -74,6 +74,9 @@ def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_on
         pass  # frozen slice: membership comes from the file only
     else:
         recs = [r for r in recs if is_heldout(r) == (split == "kl")]
+        if split != "kl" and SLICE_FILE.exists():  # frozen slice members are never calibration/KD data, whatever is_heldout says
+            frozen = {tuple(x) for x in json.loads(SLICE_FILE.read_text())}
+            recs = [r for r in recs if (r["src"], r["id"], r["k"]) not in frozen]
     if correct_only: recs = [r for r in recs if r["correct"]]
     recs.sort(key=lambda r: (r["src"], r["id"], r["k"]))
     if split == "kl":
