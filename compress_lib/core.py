@@ -78,14 +78,26 @@ def gptq_uniform(Wp: torch.Tensor, Hp: torch.Tensor | None, delta: torch.Tensor,
     d = delta.float().unsqueeze(1)
     if Hp is None:
         return torch.clamp(torch.round(W / d), -qmax, qmax).to(torch.int32)
-    H = Hp.float().clone()
-    dead = torch.diag(H) == 0
-    H[dead, dead] = 1.0
+    H0 = Hp.double().clone()
+    H0 = (H0 + H0.T) / 2  # rotation in fp32 can leave tiny asymmetry
+    dead = torch.diag(H0) == 0
+    H0[dead, dead] = 1.0
     W[:, dead] = 0
-    H += damp * torch.mean(torch.diag(H)) * torch.eye(in_f, device=H.device)
-    L = torch.linalg.cholesky(H)
-    Hinv = torch.cholesky_inverse(L)
-    Hinv = torch.linalg.cholesky(Hinv, upper=True)
+    # Cholesky in float64; if the (very ill-conditioned) Hessian still fails, escalate the damping x10 and log it.
+    Hinv = None
+    for k in range(6):
+        dk = damp * (10 ** k)
+        H = H0 + dk * torch.mean(torch.diag(H0)) * torch.eye(in_f, device=H0.device, dtype=H0.dtype)
+        try:
+            L = torch.linalg.cholesky(H)
+            Hinv = torch.linalg.cholesky(torch.cholesky_inverse(L), upper=True).float()
+            if k:
+                print(f"  [gptq] damping escalated to {dk:g}", flush=True)
+            break
+        except torch.linalg.LinAlgError:
+            continue
+    if Hinv is None:
+        raise RuntimeError("GPTQ: Hessian not positive definite even with 1e3x damping")
     Q = torch.zeros_like(W, dtype=torch.int32)
     for i1 in range(0, in_f, blocksize):
         i2 = min(i1 + blocksize, in_f)
