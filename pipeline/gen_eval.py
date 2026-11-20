@@ -72,4 +72,5 @@ async def main():
         await asyncio.gather(*[one(client, sem, a.model, r, k, a, f) for r in rows for k in range(a.k)])
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
