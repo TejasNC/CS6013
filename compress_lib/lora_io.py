@@ -23,6 +23,7 @@ def attach(comp: str, adapters: str, out: str):
     tensors = dict(read_all(comp))
     scale = None
     for name, d in ad.items():
+        assert name + ".rans" in tensors, f"adapter {name} has no quantized base weight in {comp}"
         A, As = q8_rows(d["A"].float()); B, Bs = q8_rows(d["B"].float())
         tensors[name + ".lora_A"], tensors[name + ".lora_As"] = A, As
         tensors[name + ".lora_B"], tensors[name + ".lora_Bs"] = B, Bs
