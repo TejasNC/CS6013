@@ -1,6 +1,6 @@
 """Teacher-trace data: splits (calibration/KD vs held-out KL slice), tokenization.
 
-Leak rule: a sample (id,k) goes to the KL slice iff crc32(f"{id}|{k}") % 5 == 0; those samples are NEVER used for
+Leak rule: see is_heldout(); KL-slice samples are NEVER used for
 Hessians, Fisher, activity scores, allocation fits or KD. AIME is never loaded here.
 """
 import json, zlib
@@ -13,6 +13,10 @@ INSTR = ("Solve the following math problem. Reason step by step, and put your fi
 
 
 def is_heldout(rec) -> bool:
+    """KL slice = every hmmt_feb_50 sample (the official eval problems, never trained/calibrated on) plus ~20% of
+    local HMMT-2025 samples. Calibration / Hessians / Fisher / KD use ONLY the remaining local-2025 samples."""
+    if rec.get("src") == "teacher_hmmt_feb_50":
+        return True
     return zlib.crc32(f"{rec['id']}|{rec['k']}|{rec.get('src','')}".encode()) % 5 == 0
 
 
