@@ -81,6 +81,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--w-short", type=float, default=2.5); ap.add_argument("--val-problems", type=int, default=3)
     ap.add_argument("--val-every", type=int, default=1800)
+    ap.add_argument("--val-maxlen", type=int, default=6144, help="val windows use this length regardless of --maxlen (keeps val KL comparable across arms)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -103,6 +104,9 @@ def main():
     for i, ((ids, plen), r) in enumerate(zip(seqs, recs)):
         item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop" and len(ids) < a.maxlen)  # end/answer-tail weights only if the trace was not cut by --maxlen
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
+    if a.val_maxlen != a.maxlen:  # re-tokenize the held-out problems at the fixed validation length
+        vs, vr = build("cal", tok, a.val_maxlen, None, include_unfinished=True)
+        val = [(ids, plen, 1.0, False) for (ids, plen), r in zip(vs, vr) if (r["src"], r["id"]) in val_probs and not r["src"].startswith("teacher_old_")]
     if a.end_windows:  # arm B: windows that land on the real </think> and answer (prompt + last tokens), end weights apply there
         tseqs, trecs = build("cal", tok, a.maxlen, None, include_unfinished=True, tail=True)
         tk = [i for i, r in enumerate(trecs) if not r["src"].startswith("teacher_old_")]
