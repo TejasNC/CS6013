@@ -1,7 +1,9 @@
 # Local math eval (HMMT Feb 2025 + AIME 2025). Used by pipeline/run_math_eval.py.
 # Sampling/decoding values are identical to configs/eval_config.yaml (copied from
 # the TA repo's config.yaml). Prompt wording is OURS: the TAs have not published
-# the real math prompt, so this is Qwen's standard "boxed answer" instruction.
+# the real math prompt in a doc we have; the MidSem eval_config.yaml has its own
+# math_instruction (concise reasoning, \\boxed{X} once on the last line) — copy it
+# verbatim here after cloning the TA repo. Until then this is Qwen's standard "boxed answer" instruction.
 
 exp_name: "local_math_eval"
 model_name: "Qwen/Qwen3.5-4B"   # must match the model name/path the vLLM server serves
@@ -10,8 +12,13 @@ api_key: "EMPTY"
 request_timeout: 7200
 max_concurrency: 16
 
-# Produced by: python pipeline/setup_math_dataset.py
-dataset_path: "datasets/math_eval"
+# Preferred: the TAs' own hmmt_feb_50 (columns problem_idx, problem, answer, year, id),
+# git-cloned from lavinianongbri/cs6013 at
+#   CS6013Fall_ProjectEvalMidSemScript/datasets/hmmt_feb_50
+# (save_to_disk format; run_math_eval.py loads it directly). Set dataset_path to
+# that folder. Fallback (our own HMMT Feb 2025 + AIME 2025): run
+# pipeline/setup_math_dataset.py and use datasets/math_eval.
+dataset_path: "datasets/hmmt_feb_50"
 
 # Samples per problem. Local numbers are noisy at ~60 problems, so use >=4 for
 # comparing recipes; use --limit / --sources for quick screening.

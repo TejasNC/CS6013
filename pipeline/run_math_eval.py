@@ -50,8 +50,21 @@ async def main() -> None:
     from datasets import load_dataset
     from openai import AsyncOpenAI
 
-    ds = load_dataset(cfg["dataset_path"], split="train")
-    rows = [dict(r) for r in ds]
+    dpath = Path(cfg["dataset_path"])
+    if (dpath / "dataset_dict.json").is_file():
+        # TA-style `save_to_disk` dataset (e.g. the hmmt_feb_50 folder from the TA repo).
+        from datasets import load_from_disk
+
+        ds = load_from_disk(str(dpath))["train"]
+    else:
+        ds = load_dataset(str(dpath), split="train")
+    rows = []
+    for i, r in enumerate(ds):
+        r = dict(r)
+        r.setdefault("source", dpath.name)
+        r.setdefault("example_id", f"{r['source']}-{r.get('id', r.get('problem_idx', i))}")
+        r["answer"] = str(r["answer"])
+        rows.append(r)
     if args.sources:
         rows = [r for r in rows if r["source"] in args.sources]
     limit = args.limit if args.limit is not None else cfg.get("limit")
