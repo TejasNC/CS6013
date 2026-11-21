@@ -19,12 +19,12 @@ def cmd_mu(a):
     from .data import build
     M = open(Path(__file__).resolve().parents[2] / "scratch_model_path.txt").read().strip()
     tok = AutoTokenizer.from_pretrained(M)
-    seqs, recs = build("cal", tok, 4096, 12)
-    S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map="cuda").eval()
-    tot = torch.zeros(S.config.hidden_size if hasattr(S.config, "hidden_size") else 2560, device="cuda", dtype=torch.float32); n = 0
+    seqs, recs = build("cal", tok, 4096, a.n)
+    S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map=a.dev).eval()
+    tot = torch.zeros(2560, device=a.dev, dtype=torch.float32); n = 0
     with torch.no_grad():
         for ids, plen in seqs:
-            x = ids.cuda()[None]; h = S.model(input_ids=x).last_hidden_state[0].float()
+            x = ids.to(a.dev)[None]; h = S.model(input_ids=x).last_hidden_state[0].float()
             for i in range(plen, len(ids) - 1):  # boundary = position whose token ends a sentence (". ", "?", "!", or newline)
                 t = tok.decode(ids[i:i + 1])
                 if t.rstrip().endswith((".", "?", "!")) or "\n" in t:
@@ -54,7 +54,7 @@ def cmd_apply(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
-    m = sub.add_parser("mu"); m.add_argument("--student", required=True); m.add_argument("--out", required=True)
+    m = sub.add_parser("mu"); m.add_argument("--student", required=True); m.add_argument("--dev", default="cuda"); m.add_argument("--n", type=int, default=12); m.add_argument("--out", required=True)
     p = sub.add_parser("apply"); p.add_argument("--comp", required=True); p.add_argument("--restored", required=True)
     p.add_argument("--mu", required=True); p.add_argument("--beta", type=float, required=True); p.add_argument("--out", required=True)
     a = ap.parse_args(); (cmd_mu if a.cmd == "mu" else cmd_apply)(a)
