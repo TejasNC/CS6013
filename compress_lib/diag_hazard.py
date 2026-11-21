@@ -22,7 +22,8 @@ def hazards(m, ids, plen):
         hi = min(i + 4096, et)  # positions predicting tokens plen..et ; token at position et is </think>, predicted at et-1
         lg = (h[i:hi] @ W.T).float(); lp = torch.log_softmax(lg, -1)[:, end_think]; out.append(lp)
     lp = torch.cat(out); p = lp.exp()
-    return p[:-1].sum().item(), p[-1].item(), p[:-1].max().item()
+    early = p[:min(int(os.environ.get('EARLY', 3000)), len(p) - 1)].sum().item()
+    return p[:-1].sum().item(), p[-1].item(), p[:-1].max().item(), early
 for name, m in models.items():
     rows = [hazards(m, ids, plen) for ids, plen, r in items]
-    print(f"{name:20s} sum P(</think>) before true end: {[round(a, 3) for a, b, c in rows]}  mean {sum(a for a,_,_ in rows)/len(rows):.3f} | P at true end mean {sum(b for _,b,_ in rows)/len(rows):.3f} | max early P {max(c for _,_,c in rows):.3f}", flush=True)
+    print(f"{name:20s} sum P(</think>) before true end: {[round(a, 3) for a, b, c, d in rows]}  mean {sum(a for a,_,_,_ in rows)/len(rows):.3f} | P at true end mean {sum(b for _,b,_,_ in rows)/len(rows):.3f} | max early P {max(c for _,_,c,_ in rows):.3f} | EARLY(<3k tokens) sum P mean {sum(d for _,_,_,d in rows)/len(rows):.4f}", flush=True)

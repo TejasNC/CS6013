@@ -133,7 +133,7 @@ def main():
         from .budget_gen import WRAP
         from .data import problems as _problems, _instr
         pb = _problems(); wrap_ids = tok(WRAP, add_special_tokens=False).input_ids
-        n_b = 0; per_cut = {}
+        bitems = []; per_cut = {}
         for l in open(a.budget_data):
             r = json.loads(l)
             if not r["correct"] or r["finish"] != "stop" or (r["src"], r["id"]) in val_probs: continue
@@ -145,9 +145,15 @@ def main():
             ids = pid + pre + wrap_ids + ans
             nresp_pre, n_wrap = len(pre), len(wrap_ids)
             w = torch.ones(len(ids) - len(pid)); w[nresp_pre:] = a.w_budget_end
-            ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap] = True  # forced wrap phrase incl. </think>
-            data.append((torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))); n_b += 1; per_cut[r["cut"]] = per_cut.get(r["cut"], 0) + 1
-        print(f"budget-forced sequences: {n_b} per cut {per_cut}", flush=True)
+            ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap + 16] = True  # forced wrap phrase incl. </think> and the first answer tokens; the answer body keeps teacher KL
+            bitems.append((r["cut"], (torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))))
+        rr = random.Random(7); short = [b for b in bitems if b[0] <= 6144]; long_ = [b for b in bitems if b[0] > 6144]
+        max_short = int(0.3 / 0.7 * len(long_))  # 4k+6k cuts capped at ~30% of the budget examples: the forced stop acts like a hazard rising with length
+        rr.shuffle(short); short = short[:max_short]
+        for cut, item in short + long_:
+            data.append(item); per_cut[cut] = per_cut.get(cut, 0) + 1
+        n_b = len(short) + len(long_)
+        print(f"budget-forced sequences: {n_b} per cut {dict(sorted(per_cut.items()))} (4k+6k capped at 30%: kept {len(short)} of {len(bitems) - len(long_)})", flush=True)
     if a.complete_maxlen:
         cseqs, crecs = build("cal", tok, a.complete_maxlen + 600, None, include_unfinished=False)  # finished traces only, whole sequence
         ck = [i for i, r in enumerate(crecs) if not r["src"].startswith("teacher_old_") and r["correct"] and r["finish"] == "stop"
