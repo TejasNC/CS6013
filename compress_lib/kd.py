@@ -99,6 +99,8 @@ def main():
     ap.add_argument("--rev", type=float, default=0.0, help="weight of reverse KL (student||teacher) in the loss")
     ap.add_argument("--no-early-stop", action="store_true", help="always snapshot at each val check; never stop on val KL (on-policy KD selects checkpoints by other metrics)")
     ap.add_argument("--budget-data", default=None, help="budget_gen.py output: thinking prefix + wrap phrase + </think> + teacher answer")
+    ap.add_argument("--short-share", type=float, default=0.3, help="max combined share of the 4k+6k cuts among budget examples")
+    ap.add_argument("--w-wrap", type=float, default=0.0, help="weight on the wrap phrase and </think> (default: --w-budget-end)")
     ap.add_argument("--w-budget", type=float, default=1.0); ap.add_argument("--w-budget-end", type=float, default=5.0)
     ap.add_argument("--budget-window", type=int, default=6000, help="for cuts >= 12288 keep only the last N prefix tokens (window ends at wrap + answer)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
@@ -145,11 +147,12 @@ def main():
             ids = pid + pre + wrap_ids + ans
             nresp_pre, n_wrap = len(pre), len(wrap_ids)
             w = torch.ones(len(ids) - len(pid)); w[nresp_pre:] = a.w_budget_end
+            if a.w_wrap > 0: w[nresp_pre:nresp_pre + n_wrap] = a.w_wrap  # arm B: stronger weight on the wrap phrase and </think>
             ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap + 16] = True  # forced wrap phrase incl. </think> and the first answer tokens; the answer body keeps teacher KL
             if r["cut"] >= 12288: ce[nresp_pre + n_wrap:] = True  # windowed item: the teacher on this truncated context lacks the dropped reasoning, so train the verified full-context answer with CE, not KL
             bitems.append((r["cut"], (torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))))
         rr = random.Random(7); short = [b for b in bitems if b[0] <= 6144]; long_ = [b for b in bitems if b[0] > 6144]
-        max_short = int(0.3 / 0.7 * len(long_))  # 4k+6k cuts capped at ~30% of the budget examples: the forced stop acts like a hazard rising with length
+        max_short = int(a.short_share / (1 - a.short_share) * len(long_))  # 4k+6k cuts capped at ~30% of the budget examples: the forced stop acts like a hazard rising with length
         rr.shuffle(short); short = short[:max_short]
         for cut, item in short + long_:
             data.append(item); per_cut[cut] = per_cut.get(cut, 0) + 1
