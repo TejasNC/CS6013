@@ -12,6 +12,7 @@ Outputs adapters.pt (fp32 A,B per original weight name) every --save-every secon
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 import time
@@ -57,19 +58,24 @@ def hf_to_ckpt_name(n: str) -> str:  # model.layers.3.mlp.up_proj -> model.langu
     return n.replace("model.layers.", "model.language_model.layers.") + ".weight"
 
 
-def chunked_kl(h_t, h_s, W_t, W_s, weights, chunk=512, rev=0.0):
-    """sum_i w_i * [(1-rev) KL(t||s) + rev KL(s||t)], logits never materialised in full."""
+def chunked_kl(h_t, h_s, W_t, W_s, weights, chunk=512, rev=0.0, tgt=None, ce=None):
+    """sum_i w_i * [(1-rev) KL(t||s) + rev KL(s||t)]; at positions where ce[i] is True the loss is instead the
+    cross-entropy of the FORCED token tgt[i] (used to teach emitting the wrap phrase / </think>, which the teacher itself would not emit).
+    Logits are never materialised in full."""
     tot = h_s.new_zeros((), dtype=torch.float32)
     for i in range(0, h_s.shape[0], chunk):
-        def f(hs, ht, w):
+        def f(hs, ht, w, tg, cm):
             ls = F.log_softmax((hs @ W_s.T).float(), -1)
             with torch.no_grad():
                 lt = F.log_softmax((ht @ W_t.T).float(), -1)
             k = (lt.exp() * (lt - ls)).sum(-1)
             if rev > 0:
                 k = (1 - rev) * k + rev * (ls.exp() * (ls - lt)).sum(-1)
+            if cm is not None:
+                k = torch.where(cm, -ls.gather(-1, tg.unsqueeze(-1)).squeeze(-1), k)
             return (k * w).sum()
-        tot = tot + checkpoint(f, h_s[i:i + chunk], h_t[i:i + chunk], weights[i:i + chunk], use_reentrant=False)
+        sl = slice(i, i + chunk)
+        tot = tot + checkpoint(f, h_s[sl], h_t[sl], weights[sl], tgt[sl] if tgt is not None else None, ce[sl] if ce is not None else None, use_reentrant=False)
     return tot
 
 
@@ -92,6 +98,9 @@ def main():
     ap.add_argument("--roll-maxlen", type=int, default=0, help="max length for rollout sequences (default: --maxlen)")
     ap.add_argument("--rev", type=float, default=0.0, help="weight of reverse KL (student||teacher) in the loss")
     ap.add_argument("--no-early-stop", action="store_true", help="always snapshot at each val check; never stop on val KL (on-policy KD selects checkpoints by other metrics)")
+    ap.add_argument("--budget-data", default=None, help="budget_gen.py output: thinking prefix + wrap phrase + </think> + teacher answer")
+    ap.add_argument("--w-budget", type=float, default=1.0); ap.add_argument("--w-budget-end", type=float, default=5.0)
+    ap.add_argument("--budget-window", type=int, default=6000, help="for cuts >= 12288 keep only the last N prefix tokens (window ends at wrap + answer)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -120,6 +129,25 @@ def main():
             if (r["src"], r["id"]) in val_probs: continue
             data.append((ids, plen, a.w_roll, r["finish"] == "stop" and len(ids) < (a.roll_maxlen or a.maxlen))); n_r += 1
         print(f"on-policy student rollouts added: {n_r}", flush=True)
+    if a.budget_data:
+        from .budget_gen import WRAP
+        from .data import problems as _problems, _instr
+        pb = _problems(); wrap_ids = tok(WRAP, add_special_tokens=False).input_ids
+        n_b = 0; per_cut = {}
+        for l in open(a.budget_data):
+            r = json.loads(l)
+            if not r["correct"] or r["finish"] != "stop" or (r["src"], r["id"]) in val_probs: continue
+            msg = [{"role": "user", "content": f"{_instr()}\n\nProblem:\n{pb[(r['src'], r['id'])].strip()}"}]
+            pid = tok(tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True), add_special_tokens=False).input_ids
+            pre = tok(r["prefix"] + "\n\n", add_special_tokens=False).input_ids
+            if r["cut"] >= 12288: pre = pre[-a.budget_window:]
+            ans = tok(r["answer"], add_special_tokens=False).input_ids + [tok.convert_tokens_to_ids("<|im_end|>")]
+            ids = pid + pre + wrap_ids + ans
+            nresp_pre, n_wrap = len(pre), len(wrap_ids)
+            w = torch.ones(len(ids) - len(pid)); w[nresp_pre:] = a.w_budget_end
+            ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap] = True  # forced wrap phrase incl. </think>
+            data.append((torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))); n_b += 1; per_cut[r["cut"]] = per_cut.get(r["cut"], 0) + 1
+        print(f"budget-forced sequences: {n_b} per cut {per_cut}", flush=True)
     if a.complete_maxlen:
         cseqs, crecs = build("cal", tok, a.complete_maxlen + 600, None, include_unfinished=False)  # finished traces only, whole sequence
         ck = [i for i, r in enumerate(crecs) if not r["src"].startswith("teacher_old_") and r["correct"] and r["finish"] == "stop"
@@ -174,7 +202,7 @@ def main():
     @torch.no_grad()
     def val_kl():
         S.eval(); tot = 0.0; n = 0
-        for ids, plen, _, _ in val:
+        for ids, plen, *_ in val:
             ids = ids.to(dev)[None]
             h_t = T.model(input_ids=ids).last_hidden_state[0]; h_s = S.model(input_ids=ids).last_hidden_state[0]
             lo, hi = plen - 1, ids.shape[1] - 1
@@ -186,17 +214,22 @@ def main():
     S.train()
     while time.time() - t0 < a.hours * 3600:
         random.shuffle(data)
-        for ids, plen, wseq, finished in data:
+        for item in data:
+            ids, plen, wseq, finished = item[:4]
             ids = ids.to(dev)[None]
             with torch.no_grad():
                 h_t = T.model(input_ids=ids).last_hidden_state[0]
             h_s = S.model(input_ids=ids).last_hidden_state[0]
             lo, hi = plen - 1, ids.shape[1] - 1  # positions predicting response tokens
-            w = torch.ones(hi - lo, device=dev)
             tgt = ids[0, plen:]  # token predicted at position lo + j is tgt[j]
-            w[tgt == end_id] = a.w_end
-            if finished: w[-a.tail:] = a.w_end  # answer tail only exists in traces that ended
-            loss = wseq * chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, w, rev=a.rev) / w.sum()
+            if len(item) > 4:  # budget-forced item: explicit per-token weights and CE mask
+                w, ce = item[4][0].to(dev), item[4][1].to(dev)
+                loss = wseq * chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, w, rev=a.rev, tgt=tgt, ce=ce) / w.sum()
+            else:
+                w = torch.ones(hi - lo, device=dev)
+                w[tgt == end_id] = a.w_end
+                if finished: w[-a.tail:] = a.w_end  # answer tail only exists in traces that ended
+                loss = wseq * chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, w, rev=a.rev) / w.sum()
             (loss / a.accum).backward(); run.append(loss.item()); micro += 1
             if micro % a.accum == 0:
                 frac = (time.time() - t0) / (a.hours * 3600)
