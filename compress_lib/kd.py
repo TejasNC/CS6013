@@ -57,15 +57,18 @@ def hf_to_ckpt_name(n: str) -> str:  # model.layers.3.mlp.up_proj -> model.langu
     return n.replace("model.layers.", "model.language_model.layers.") + ".weight"
 
 
-def chunked_kl(h_t, h_s, W_t, W_s, weights, chunk=512):
-    """sum_i w_i * KL(softmax(h_t W_t^T) || softmax(h_s W_s^T)), logits never materialised in full."""
+def chunked_kl(h_t, h_s, W_t, W_s, weights, chunk=512, rev=0.0):
+    """sum_i w_i * [(1-rev) KL(t||s) + rev KL(s||t)], logits never materialised in full."""
     tot = h_s.new_zeros((), dtype=torch.float32)
     for i in range(0, h_s.shape[0], chunk):
         def f(hs, ht, w):
             ls = F.log_softmax((hs @ W_s.T).float(), -1)
             with torch.no_grad():
                 lt = F.log_softmax((ht @ W_t.T).float(), -1)
-            return ((lt.exp() * (lt - ls)).sum(-1) * w).sum()
+            k = (lt.exp() * (lt - ls)).sum(-1)
+            if rev > 0:
+                k = (1 - rev) * k + rev * (ls.exp() * (ls - lt)).sum(-1)
+            return (k * w).sum()
         tot = tot + checkpoint(f, h_s[i:i + chunk], h_t[i:i + chunk], weights[i:i + chunk], use_reentrant=False)
     return tot
 
@@ -86,6 +89,8 @@ def main():
     ap.add_argument("--w-complete", type=float, default=1.5)
     ap.add_argument("--rollouts", default=None, help="student rollouts jsonl (gen_eval --keep-text on the student); added as on-policy KD data")
     ap.add_argument("--w-roll", type=float, default=1.0)
+    ap.add_argument("--roll-maxlen", type=int, default=0, help="max length for rollout sequences (default: --maxlen)")
+    ap.add_argument("--rev", type=float, default=0.0, help="weight of reverse KL (student||teacher) in the loss")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -110,9 +115,9 @@ def main():
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
     if a.rollouts:
         n_r = 0
-        for ids, plen, r in build_rollouts(a.rollouts, tok, a.maxlen):
+        for ids, plen, r in build_rollouts(a.rollouts, tok, a.roll_maxlen or a.maxlen):
             if (r["src"], r["id"]) in val_probs: continue
-            data.append((ids, plen, a.w_roll, r["finish"] == "stop" and len(ids) < a.maxlen)); n_r += 1
+            data.append((ids, plen, a.w_roll, r["finish"] == "stop" and len(ids) < (a.roll_maxlen or a.maxlen))); n_r += 1
         print(f"on-policy student rollouts added: {n_r}", flush=True)
     if a.complete_maxlen:
         cseqs, crecs = build("cal", tok, a.complete_maxlen + 600, None, include_unfinished=False)  # finished traces only, whole sequence
@@ -190,7 +195,7 @@ def main():
             tgt = ids[0, plen:]  # token predicted at position lo + j is tgt[j]
             w[tgt == end_id] = a.w_end
             if finished: w[-a.tail:] = a.w_end  # answer tail only exists in traces that ended
-            loss = wseq * chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, w) / w.sum()
+            loss = wseq * chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, w, rev=a.rev) / w.sum()
             (loss / a.accum).backward(); run.append(loss.item()); micro += 1
             if micro % a.accum == 0:
                 frac = (time.time() - t0) / (a.hours * 3600)
