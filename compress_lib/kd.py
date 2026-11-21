@@ -146,6 +146,7 @@ def main():
             nresp_pre, n_wrap = len(pre), len(wrap_ids)
             w = torch.ones(len(ids) - len(pid)); w[nresp_pre:] = a.w_budget_end
             ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap + 16] = True  # forced wrap phrase incl. </think> and the first answer tokens; the answer body keeps teacher KL
+            if r["cut"] >= 12288: ce[nresp_pre + n_wrap:] = True  # windowed item: the teacher on this truncated context lacks the dropped reasoning, so train the verified full-context answer with CE, not KL
             bitems.append((r["cut"], (torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))))
         rr = random.Random(7); short = [b for b in bitems if b[0] <= 6144]; long_ = [b for b in bitems if b[0] > 6144]
         max_short = int(0.3 / 0.7 * len(long_))  # 4k+6k cuts capped at ~30% of the budget examples: the forced stop acts like a hazard rising with length
