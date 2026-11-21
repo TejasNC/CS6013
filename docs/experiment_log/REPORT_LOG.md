@@ -13,6 +13,7 @@ Data and checkpoints: `/mnt/nas/tejaschaudhari/emir_data/`.
 | Decompress must restore bf16, no downloads, no model_name | course rules | Restore reads only the compressed directory (config/tokenizer files shipped alongside). |
 | HMMT is the only data for calibration, distillation and decisions; AIME 2025 is eval-only | Tejas | Hessians, KD and allocation use only the 30 local HMMT-2025 problems. The official eval set `hmmt_feb_50` (2023/2024/2026 problems) is never trained on. |
 | Official eval: TA prompt, temp 1.0, top_p 0.95, top_k 20, presence penalty 1.5, 32k new tokens, thinking on | TA config | All later evals use the exact TA instruction (see D2). |
+| Training on outputs of a larger model (e.g. Qwen3.5-9B traces or logits) is allowed by the course rules | Tejas, Sat ~14:25 (confirmed Sat ~14:45) | The 9B may be used as a teacher for distillation (D17); only the compressed artifact is submitted, so the 9B is never part of the submission. |
 | Compute: bee, 4 shared 48 GB GPUs, other users present, 24 h target (Sat 16:00), Tejas allowed 6 to 8 h over | Tejas | Evals are k=2; the KL proxy screens; HMMT confirms finalists only. |
 
 ## 1. Method summary
