@@ -44,6 +44,7 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--teacher", default=None); ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--out", required=True); ap.add_argument("--cuts", default="4096,6144,8192,12288,16384")
+    ap.add_argument("--shard", default="0/1", help="i/n: run every n-th job starting at i (parallel servers)")
     ap.add_argument("--conc", type=int, default=64); ap.add_argument("--dry", action="store_true"); ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     from transformers import AutoTokenizer
@@ -68,6 +69,8 @@ async def main():
             prefix = cut_at_sentence(tok, think_ids, cut)
             if prefix is None: continue
             jobs.append(dict(id=r["id"], src=r["src"], k=r["k"], cut=cut, prefix=prefix, gold=r["gold"]))
+    si, sn = [int(x) for x in a.shard.split("/")]
+    jobs = jobs[si::sn]
     by_cut = {c: sum(j["cut"] == c for j in jobs) for c in cuts}
     print("candidate jobs", len(jobs), "per cut", by_cut, flush=True)
     if a.dry: return
