@@ -181,6 +181,9 @@ def restore_embedding(t: dict, V: int, d: int, dev: str) -> torch.Tensor:
     rows3 = np.where(tier == 2)[0]
     idx = t["embed.t3.idx"].to(torch.int32) & 0xFFFF
     E[torch.from_numpy(rows3)] = t["embed.t3.centroids"][idx.long()]
+    if "embed.override.idx" in t:  # exact bf16 rows that replace quantized ones (e.g. the </think> row after a stop-logit bias)
+        idx = t["embed.override.idx"].long()
+        E[idx] = t["embed.override.rows"].to(torch.bfloat16)
     return E
 
 
