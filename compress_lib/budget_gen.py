@@ -30,10 +30,14 @@ def cut_at_sentence(tok, ids, cut):
     m = list(re.finditer(r"(?:[.!?]\)?\$?|\n\n)(?=\s)", text))
     if not m:
         return None
-    end = m[-1].end()
-    if end < 0.8 * len(text):  # no boundary near the cut: skip rather than cut mid-thought
-        return None
-    return text[:end].rstrip()
+    ABBR = re.compile(r"(?:\be\.g|\bi\.e|\betc|\bvs|\bFig|\bapprox|\bNo|\bcf|\bresp|\bDr|\bMr)\.$")
+    for mm in reversed(m):  # last boundary that does not follow an abbreviation (e.g., i.e., etc., vs., ...)
+        end = mm.end()
+        if end < 0.8 * len(text):  # no boundary near the cut: skip rather than cut mid-thought
+            return None
+        if not ABBR.search(text[:end].rstrip()):
+            return text[:end].rstrip()
+    return None
 
 
 async def main():
