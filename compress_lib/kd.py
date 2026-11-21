@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--w-wrap", type=float, default=0.0, help="weight on the wrap phrase and </think> (default: --w-budget-end)")
     ap.add_argument("--w-budget", type=float, default=1.0); ap.add_argument("--w-budget-end", type=float, default=5.0)
     ap.add_argument("--budget-window", type=int, default=6000, help="for cuts >= 12288 keep only the last N prefix tokens (window ends at wrap + answer)")
+    ap.add_argument("--guard-stop", action="store_true", help="run stop-token and hazard guards at every val check; stop at the first failure (im_end rank != 0, or hazard > 2x teacher)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -219,6 +220,29 @@ def main():
             tot += chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, torch.ones(hi - lo, device=dev)).item(); n += hi - lo
         S.train(); return tot / max(n, 1)
 
+    # ---- per-checkpoint guards on finished correct validation-problem traces (full sequences, <= 11.5k tokens) ----
+    gitems = []
+    if a.guard_stop:
+        gs, gr = build("cal", tok, 11500, None)
+        gl = [(ids, plen) for (ids, plen), r in zip(gs, gr) if r["finish"] == "stop" and r["correct"] and (r["src"], r["id"]) in val_probs
+              and not r["src"].startswith("teacher_old_") and len(ids) < 11500]
+        gitems = sorted(gl, key=lambda x: len(x[0]))[:6]
+        im_end_id = tok.convert_tokens_to_ids("<|im_end|>")
+
+    @torch.no_grad()
+    def guards(m):
+        hz, pe, pi, rk, early = [], [], [], [], []
+        for ids, plen in gitems:
+            x = ids.to(dev)[None]; h = m.model(input_ids=x).last_hidden_state[0]; W = m.lm_head.weight
+            et = (ids == end_id).nonzero()[-1].item()
+            p = torch.cat([torch.softmax((h[i:min(i + 2048, et)] @ W.T).float(), -1)[:, end_id] for i in range(plen - 1, et, 2048)])
+            hz.append(p[:-1].sum().item()); pe.append(p[-1].item()); early.append(p[:3000].sum().item())
+            lg = (h[len(ids) - 2] @ W.T).float(); pi.append(torch.softmax(lg, -1)[im_end_id].item()); rk.append(int((lg > lg[im_end_id]).sum().item()))
+        n = max(len(gitems), 1)
+        return dict(hazard=sum(hz) / n, p_end=sum(pe) / n, early=sum(early) / n, p_imend=sum(pi) / n, rank_max=max(rk) if rk else 0)
+
+    gref = guards(T) if a.guard_stop else None
+    if gref: print("GUARD teacher reference:", {k: round(v, 4) for k, v in gref.items()}, flush=True)
     v0 = val_kl(); print(f"val KL (unweighted, held-out problems) at start: {v0:.5f}", flush=True); best_val = v0
     torch.save(snapshot(), out / "best_adapters.pt")
     S.train()
@@ -254,6 +278,11 @@ def main():
             if time.time() - last_val > a.val_every and micro % a.accum == 0:
                 last_val = time.time(); v = val_kl()
                 print(f"VAL step {step} elapsed {time.time()-t0:.0f}s val KL {v:.5f} (best {best_val:.5f})", flush=True)
+                if a.guard_stop:
+                    gv = guards(S); ok = gv["rank_max"] == 0 and gv["hazard"] <= 2 * gref["hazard"] and gv["early"] <= max(2 * gref["early"], 0.002) and gv["p_imend"] >= 0.7 * gref["p_imend"]
+                    print(f"GUARD step {step} elapsed {time.time()-t0:.0f}s: " + str({k: round(x, 4) for k, x in gv.items()}) + f" -> {'PASS' if ok else 'FAIL'}", flush=True)
+                    if not ok:
+                        torch.save(snapshot(), out / f"adapters_FAILED_t{int((time.time()-t0)/60)}min.pt"); print("guard failed: stopping this arm", flush=True); a.hours = 0
                 if a.no_early_stop:
                     torch.save(snapshot(), out / f"adapters_t{int((time.time()-t0)/60)}min.pt"); best_val = min(best_val, v)
                 elif v < best_val:
