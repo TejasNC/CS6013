@@ -90,6 +90,8 @@ KL = teacher-forced KL(teacher‖student) on a frozen slice of 15 held-out teach
 | B3b overshoot | Time lost on one build | Rule: no more water-filling rounds without a floor on early layers |
 | My cleanup step in the round-3 post pipeline killed every vLLM engine of my user, including the A3 server that was mid-evaluation (Sat 11:07); the A3 client hung on a dead server | A3's HMMT eval lost ~1 h | Servers are now killed by exact PID file only; A3 eval relaunched split across GPU 3 and GPU 0 (Tejas freed GPU 0) |
 
+- Step 0 go bar (reviewer clarification, Sat ~14:25): compare like with like at the 16k cap. The 9B passes if either (a) its correct-and-finished-within-16k rate is ≥ the 4B's same measure + 10 points, where the 4B number on the 27 non-val train problems is **22.9% (11 of 48 generations correct and finished within 16k; finished within 8k: 6.3%; 32k-cap finish rate 60%, correct 54%, mean finished length 18.1k, 'Wait' 3.1 per 1k)**, i.e. ≥ ~32.9%; or (b) its finished-within-8k rate is ≥ ~3x 6.3% = ~19%. Also report the mean length of the 9B's correct finished traces: if it is correct but needs 14k+ tokens, use the 9B only for answer quality in the budget cuts, not for length shaping. The tokenizer match turns arm D (logit KD vs the 9B) on.
+
 ## 5. Reviewer verdicts (chronological)
 
 - Implementation reviewer: PASS on b32ecee/d087d6e/fc38620 (fp16-exact GPTQ step, counts required for embedding tiers); PASS on 5e4f6cd (float64 Cholesky); PASS on KD/LoRA 37d0b1b..776cd6c for the smoke test, with fixes for the KL-slice leak and non-reentrant gradient checkpointing (f7bdc66, 25a9767); a4b2888 loop reviewed: no leak, finished traces too long for the 6144 truncation to see real ends (leads to end-windows).
