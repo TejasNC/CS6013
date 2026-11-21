@@ -24,6 +24,10 @@ def load(name):
     if name == "hmmt_feb_50":
         ds = load_dataset(str(ROOT / "ta_eval/CS6013Fall_ProjectEvalMidSemScript/datasets/hmmt_feb_50"), split="train")
         return [dict(id=r["id"], problem=r["problem"], answer=r["answer"]) for r in ds]
+    if name == "hmmt_nov_2025":  # held-out validation set (MathArena/hmmt_nov_2025, 30 problems); NEVER used for training/calibration
+        from datasets import load_from_disk
+        ds = load_from_disk("/mnt/nas/tejaschaudhari/emir_data/hmmt_nov_2025")
+        return [dict(id=f"nov_2025-{r['problem_idx']}", problem=r["problem"], answer=r["answer"]) for r in ds]
     ds = load_dataset(str(ROOT / "CS6013/datasets/math_eval"), split="train")
     src = {"aime_2025": "aime_2025", "hmmt_2025_local": "hmmt_feb_2025"}[name]
     return [dict(id=r["example_id"], problem=r["problem"], answer=r["answer"]) for r in ds if r["source"] == src]
