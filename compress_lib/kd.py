@@ -91,6 +91,7 @@ def main():
     ap.add_argument("--w-roll", type=float, default=1.0)
     ap.add_argument("--roll-maxlen", type=int, default=0, help="max length for rollout sequences (default: --maxlen)")
     ap.add_argument("--rev", type=float, default=0.0, help="weight of reverse KL (student||teacher) in the loss")
+    ap.add_argument("--no-early-stop", action="store_true", help="always snapshot at each val check; never stop on val KL (on-policy KD selects checkpoints by other metrics)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -210,7 +211,9 @@ def main():
             if time.time() - last_val > a.val_every and micro % a.accum == 0:
                 last_val = time.time(); v = val_kl()
                 print(f"VAL step {step} elapsed {time.time()-t0:.0f}s val KL {v:.5f} (best {best_val:.5f})", flush=True)
-                if v < best_val:
+                if a.no_early_stop:
+                    torch.save(snapshot(), out / f"adapters_t{int((time.time()-t0)/60)}min.pt"); best_val = min(best_val, v)
+                elif v < best_val:
                     best_val = v; worse = 0; torch.save(snapshot(), out / "best_adapters.pt"); torch.save(snapshot(), out / f"adapters_t{int((time.time()-t0)/60)}min.pt")
                 else:
                     worse += 1
