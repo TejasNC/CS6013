@@ -82,6 +82,8 @@ def main():
     ap.add_argument("--w-short", type=float, default=2.5); ap.add_argument("--val-problems", type=int, default=3)
     ap.add_argument("--val-every", type=int, default=1800)
     ap.add_argument("--val-maxlen", type=int, default=6144, help="val windows use this length regardless of --maxlen (keeps val KL comparable across arms)")
+    ap.add_argument("--complete-maxlen", type=int, default=0, help="if >0: whole (unwindowed) sequences up to this length for finished correct traces, end weights x5, shortest per problem boosted")
+    ap.add_argument("--w-complete", type=float, default=1.5)
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -104,6 +106,19 @@ def main():
     for i, ((ids, plen), r) in enumerate(zip(seqs, recs)):
         item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop" and len(ids) < a.maxlen)  # end/answer-tail weights only if the trace was not cut by --maxlen
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
+    if a.complete_maxlen:
+        cseqs, crecs = build("cal", tok, a.complete_maxlen + 600, None, include_unfinished=False)  # finished traces only, whole sequence
+        ck = [i for i, r in enumerate(crecs) if not r["src"].startswith("teacher_old_") and r["correct"] and r["finish"] == "stop"
+              and (r["src"], r["id"]) not in val_probs and len(cseqs[i][0]) < a.complete_maxlen + 600]
+        byp = {}
+        for i in ck: byp.setdefault((crecs[i]["src"], crecs[i]["id"]), []).append((crecs[i]["ntok"], i))
+        n_short = 0
+        for v in byp.values():
+            for rank, (_, i) in enumerate(sorted(v)):
+                ids, plen = cseqs[i]
+                short = rank < a.shortest_per_problem
+                data.append((ids, plen, a.w_short if short else a.w_complete, True)); n_short += short
+        print(f"complete (unwindowed) short traces: {len(ck)} from {len(byp)} problems ({n_short} boosted x{a.w_short}), mean len {sum(len(cseqs[i][0]) for i in ck)/max(len(ck),1):.0f} tokens", flush=True)
     if a.val_maxlen != a.maxlen:  # re-tokenize the held-out problems at the fixed validation length
         vs, vr = build("cal", tok, a.val_maxlen, None, include_unfinished=True)
         val = [(ids, plen, 1.0, False) for (ids, plen), r in zip(vs, vr) if (r["src"], r["id"]) in val_probs and not r["src"].startswith("teacher_old_")]
