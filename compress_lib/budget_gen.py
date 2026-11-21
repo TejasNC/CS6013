@@ -43,7 +43,9 @@ def cut_at_sentence(tok, ids, cut):
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--teacher", default=None); ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--out", required=True); ap.add_argument("--cuts", default="4096,6144,8192,12288,16384")
+    ap.add_argument("--out", required=True); ap.add_argument("--src", default=None, help="jsonl with text/id/k/gold (default: the local teacher traces); e.g. on-policy student rollouts")
+    ap.add_argument("--exclude-val", action="store_true", help="skip the 3 validation problems (needed only for the default source; rollout files already exclude them)")
+    ap.add_argument("--cuts", default="4096,6144,8192,12288,16384")
     ap.add_argument("--shard", default="0/1", help="i/n: run every n-th job starting at i (parallel servers)")
     ap.add_argument("--conc", type=int, default=64); ap.add_argument("--dry", action="store_true"); ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
@@ -52,10 +54,11 @@ async def main():
     tok = AutoTokenizer.from_pretrained(M)
     probs = problems()
     recs = []
-    for l in open(RUNS / "teacher_hmmt_2025_local.jsonl"):
+    for l in open(a.src or (RUNS / "teacher_hmmt_2025_local.jsonl")):
         r = json.loads(l); r["src"] = "teacher_hmmt_2025_local"
         if "text" in r: recs.append(r)
-    val = val_problem_set(recs)
+    val = val_problem_set(recs) if (a.src is None or a.exclude_val) else set()
+    if a.src: print('source', a.src, 'records', len(recs), flush=True)
     cuts = [int(x) for x in a.cuts.split(",")]
     jobs = []
     for r in recs:
