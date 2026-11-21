@@ -91,3 +91,16 @@ def build(split: str, tok, max_len: int, max_seqs: int | None = None, correct_on
         recs = [r for r in recs if (r["src"], r["id"], r["k"]) in keep]
     out = [tokenize(r, tok, probs, max_len, tail) for r in recs[:max_seqs]]
     return out, recs[:max_seqs]
+
+
+def build_rollouts(path, tok, max_len, finished_only=False):
+    """Student rollouts (gen_eval --keep-text from the STUDENT server) as KD data: teacher scores the student's own tokens (on-policy KD)."""
+    probs = problems(); out = []
+    for l in open(path):
+        r = json.loads(l)
+        if "text" not in r: continue
+        r["src"] = "teacher_hmmt_2025_local"  # prompt/problem lookup only
+        if finished_only and r["finish"] != "stop": continue
+        ids, plen = tokenize(r, tok, probs, max_len)
+        out.append((ids, plen, r))
+    return out

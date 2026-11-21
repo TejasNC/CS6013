@@ -64,10 +64,11 @@ async def main():
     ap.add_argument("--seed-base", type=int, default=0)
     ap.add_argument("--keep-text", action="store_true")
     ap.add_argument("--model", default="Qwen/Qwen3.5-4B")
+    ap.add_argument("--exclude", default="", help="comma-separated problem ids to skip")
     a = ap.parse_args()
     from openai import AsyncOpenAI
     client = AsyncOpenAI(base_url=f"http://localhost:{a.port}/v1", api_key="EMPTY", timeout=7200)
-    rows = load(a.data)
+    rows = [r for r in load(a.data) if r["id"] not in set(filter(None, a.exclude.split(",")))]
     sem = asyncio.Semaphore(a.conc)
     done = set()
     if os.path.exists(a.out):  # resume: skip (id, k) pairs already in the output file

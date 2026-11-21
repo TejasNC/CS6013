@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch.utils.checkpoint import checkpoint
 
-from .data import build
+from .data import build, build_rollouts
 
 TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj", "gate_proj", "up_proj", "down_proj")
 
@@ -84,6 +84,8 @@ def main():
     ap.add_argument("--val-maxlen", type=int, default=6144, help="val windows use this length regardless of --maxlen (keeps val KL comparable across arms)")
     ap.add_argument("--complete-maxlen", type=int, default=0, help="if >0: whole (unwindowed) sequences up to this length for finished correct traces, end weights x5, shortest per problem boosted")
     ap.add_argument("--w-complete", type=float, default=1.5)
+    ap.add_argument("--rollouts", default=None, help="student rollouts jsonl (gen_eval --keep-text on the student); added as on-policy KD data")
+    ap.add_argument("--w-roll", type=float, default=1.0)
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -106,6 +108,12 @@ def main():
     for i, ((ids, plen), r) in enumerate(zip(seqs, recs)):
         item = (ids, plen, a.w_short if i in boosted else 1.0, r["finish"] == "stop" and len(ids) < a.maxlen)  # end/answer-tail weights only if the trace was not cut by --maxlen
         (val if (r["src"], r["id"]) in val_probs else data).append(item)
+    if a.rollouts:
+        n_r = 0
+        for ids, plen, r in build_rollouts(a.rollouts, tok, a.maxlen):
+            if (r["src"], r["id"]) in val_probs: continue
+            data.append((ids, plen, a.w_roll, r["finish"] == "stop" and len(ids) < a.maxlen)); n_r += 1
+        print(f"on-policy student rollouts added: {n_r}", flush=True)
     if a.complete_maxlen:
         cseqs, crecs = build("cal", tok, a.complete_maxlen + 600, None, include_unfinished=False)  # finished traces only, whole sequence
         ck = [i for i, r in enumerate(crecs) if not r["src"].startswith("teacher_old_") and r["correct"] and r["finish"] == "stop"
