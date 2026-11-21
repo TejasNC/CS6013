@@ -19,7 +19,10 @@ def cmd_mu(a):
     from .data import build
     M = open(Path(__file__).resolve().parents[2] / "scratch_model_path.txt").read().strip()
     tok = AutoTokenizer.from_pretrained(M)
-    seqs, recs = build("cal", tok, 4096, a.n)
+    seqs, recs = build("cal", tok, 4096, None)
+    val = {(r["src"], r["id"]) for r in recs}; import random; allp = sorted(val); random.Random(1234).shuffle(allp); vp = set(allp[:3])
+    keep = [i for i, r in enumerate(recs) if (r["src"], r["id"]) not in vp and not r["src"].startswith("teacher_old_")][:a.n]
+    seqs = [seqs[i] for i in keep]  # calibration traces only: the 3 validation problems are excluded from mu
     S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map=a.dev).eval()
     tot = torch.zeros(2560, device=a.dev, dtype=torch.float32); n = 0
     with torch.no_grad():
@@ -31,6 +34,31 @@ def cmd_mu(a):
                     tot += h[i]; n += 1
     mu = tot / max(n, 1)
     torch.save(dict(mu=mu.cpu(), n=n), a.out); print("mu from", n, "boundary positions, |mu|^2 =", float(mu @ mu))
+
+
+def cmd_shift(a):
+    """Realized </think> logit shift h . delta on HELD-OUT states (3 validation problems' traces), p10/p50/p90, boundary vs mid-sentence."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from .data import build
+    M = open(Path(__file__).resolve().parents[2] / "scratch_model_path.txt").read().strip()
+    tok = AutoTokenizer.from_pretrained(M)
+    seqs, recs = build("cal", tok, 4096, None)
+    val = {(r["src"], r["id"]) for r in recs}
+    import random
+    allp = sorted(val); random.Random(1234).shuffle(allp); vp = set(allp[:3])
+    held = [(ids, plen) for (ids, plen), r in zip(seqs, recs) if (r["src"], r["id"]) in vp and not r["src"].startswith("teacher_old_")][:8]
+    mu = torch.load(a.mu)["mu"].float().to(a.dev)
+    S = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map=a.dev).eval()
+    bnd, mid = [], []
+    with torch.no_grad():
+        for ids, plen in held:
+            h = S.model(input_ids=ids.to(a.dev)[None]).last_hidden_state[0].float()
+            for i in range(plen, len(ids) - 1):
+                t = tok.decode(ids[i:i + 1]); is_b = t.rstrip().endswith((".", "?", "!")) or "\n" in t
+                (bnd if is_b else mid).append(float(h[i] @ mu) / float(mu @ mu))
+    import numpy as np
+    for name, v in (("boundary", bnd), ("mid-sentence", mid)):
+        q = np.percentile(v, [10, 50, 90]); print(f"{name:13s} n={len(v)} shift per unit beta p10/p50/p90 = {q[0]:.3f}/{q[1]:.3f}/{q[2]:.3f}  -> beta=0.5: {0.5*q[0]:.2f}/{0.5*q[1]:.2f}/{0.5*q[2]:.2f}  beta=1.0: {q[0]:.2f}/{q[1]:.2f}/{q[2]:.2f}")
 
 
 def cmd_apply(a):
@@ -54,7 +82,8 @@ def cmd_apply(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
-    m = sub.add_parser("mu"); m.add_argument("--student", required=True); m.add_argument("--dev", default="cuda"); m.add_argument("--n", type=int, default=12); m.add_argument("--out", required=True)
+    m = sub.add_parser("mu"); m.add_argument("--student", required=True); m.add_argument("--dev", default="cuda"); m.add_argument("--n", type=int, default=40); m.add_argument("--out", required=True)
+    sh = sub.add_parser("shift"); sh.add_argument("--student", required=True); sh.add_argument("--mu", required=True); sh.add_argument("--dev", default="cuda")
     p = sub.add_parser("apply"); p.add_argument("--comp", required=True); p.add_argument("--restored", required=True)
     p.add_argument("--mu", required=True); p.add_argument("--beta", type=float, required=True); p.add_argument("--out", required=True)
-    a = ap.parse_args(); (cmd_mu if a.cmd == "mu" else cmd_apply)(a)
+    a = ap.parse_args(); {"mu": cmd_mu, "shift": cmd_shift, "apply": cmd_apply}[a.cmd](a)

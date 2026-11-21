@@ -104,6 +104,8 @@ def main():
     ap.add_argument("--w-budget", type=float, default=1.0); ap.add_argument("--w-budget-end", type=float, default=5.0)
     ap.add_argument("--budget-window", type=int, default=6000, help="for cuts >= 12288 keep only the last N prefix tokens (window ends at wrap + answer)")
     ap.add_argument("--guard-stop", action="store_true", help="run stop-token and hazard guards at every val check; stop at the first failure (im_end rank != 0, or hazard > 2x teacher)")
+    ap.add_argument("--min-correct", type=int, default=60, help="if fewer correct budget survivors than this, also keep boxed incorrect answers")
+    ap.add_argument("--w-incorrect-body", type=float, default=0.3, help="answer-body weight for incorrect-answer budget examples")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -139,7 +141,9 @@ def main():
         bitems = []; per_cut = {}
         for l in open(a.budget_data):
             r = json.loads(l)
-            if not r["correct"] or r["finish"] != "stop" or (r["src"], r["id"]) in val_probs: continue
+            if r["finish"] != "stop" or (r["src"], r["id"]) in val_probs: continue
+            incorrect = not r["correct"]
+            if incorrect and r.get("pred") is None: continue  # incorrect examples are kept only if the answer is boxed
             msg = [{"role": "user", "content": f"{_instr()}\n\nProblem:\n{pb[(r['src'], r['id'])].strip()}"}]
             pid = tok(tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True, enable_thinking=True), add_special_tokens=False).input_ids
             pre = tok(r["prefix"] + "\n\n", add_special_tokens=False).input_ids
@@ -151,7 +155,12 @@ def main():
             if a.w_wrap > 0: w[nresp_pre:nresp_pre + n_wrap] = a.w_wrap  # arm B: stronger weight on the wrap phrase and </think>
             ce = torch.zeros(len(ids) - len(pid), dtype=torch.bool); ce[nresp_pre:nresp_pre + n_wrap + 16] = True  # forced wrap phrase incl. </think> and the first answer tokens; the answer body keeps teacher KL
             if r["cut"] >= 12288: ce[nresp_pre + n_wrap:] = True  # windowed item: the teacher on this truncated context lacks the dropped reasoning, so train the verified full-context answer with CE, not KL
-            bitems.append((r["cut"], (torch.tensor(ids), len(pid), a.w_budget, False, (w, ce))))
+            if incorrect: w[nresp_pre + n_wrap + 16:] = a.w_incorrect_body  # CE on the wrap/</think>/first answer tokens as for correct examples; answer-body KL at 0.3x
+            bitems.append((r["cut"], (torch.tensor(ids), len(pid), a.w_budget, False, (w, ce)), incorrect))
+        n_cor = sum(1 for b in bitems if not b[2])
+        if n_cor >= a.min_correct: bitems = [b for b in bitems if not b[2]]  # enough correct survivors: drop the incorrect ones
+        print(f"budget survivors: {n_cor} correct, {len(bitems) - n_cor if n_cor < a.min_correct else 0} incorrect-boxed kept (min-correct {a.min_correct})", flush=True)
+        bitems = [(b[0], b[1]) for b in bitems]
         rr = random.Random(7); short = [b for b in bitems if b[0] <= 6144]; long_ = [b for b in bitems if b[0] > 6144]
         max_short = int(a.short_share / (1 - a.short_share) * len(long_))  # 4k+6k cuts capped at ~30% of the budget examples: the forced stop acts like a hazard rising with length
         rr.shuffle(short); short = short[:max_short]
