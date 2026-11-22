@@ -231,26 +231,37 @@ def main():
             tot += chunked_kl(h_t[lo:hi], h_s[lo:hi], W_t, W_s, torch.ones(hi - lo, device=dev)).item(); n += hi - lo
         S.train(); return tot / max(n, 1)
 
-    # ---- per-checkpoint guards on finished correct validation-problem traces (full sequences, <= 11.5k tokens) ----
-    gitems = []
+    # ---- per-checkpoint guards ----
+    # hazard / early hazard: finished correct traces of ANY problem (shortest 6, full sequences < 11.5k tokens), teacher vs student on identical contexts
+    # stop gate (P(</think>) at the true end, P(<|im_end|>) after the answer, rank of <|im_end|>): tail windows of finished correct traces of the
+    # HELD-OUT validation problems (prompt + last 2600 tokens), so it is a true held-out check
+    gitems, sitems = [], []
     if a.guard_stop:
         gs, gr = build("cal", tok, 11500, None)
-        gl = [(ids, plen) for (ids, plen), r in zip(gs, gr) if r["finish"] == "stop" and r["correct"] and (r["src"], r["id"]) in val_probs
-              and not r["src"].startswith("teacher_old_") and len(ids) < 11500]
+        gl = [(ids, plen) for (ids, plen), r in zip(gs, gr) if r["finish"] == "stop" and r["correct"] and not r["src"].startswith("teacher_old_") and len(ids) < 11500]
         gitems = sorted(gl, key=lambda x: len(x[0]))[:6]
+        ss, sr = build("cal", tok, 2600, None, tail=True)
+        sitems = [(ids, plen) for (ids, plen), r in zip(ss, sr) if r["finish"] == "stop" and r["correct"] and (r["src"], r["id"]) in val_probs and not r["src"].startswith("teacher_old_")][:8]
         im_end_id = tok.convert_tokens_to_ids("<|im_end|>")
+        print(f"guard items: {len(gitems)} hazard traces, {len(sitems)} held-out stop-gate tail windows", flush=True)
+        assert gitems and sitems, "guards would be vacuous"
 
     @torch.no_grad()
     def guards(m):
-        hz, pe, pi, rk, early = [], [], [], [], []
+        hz, early = [], []
         for ids, plen in gitems:
             x = ids.to(dev)[None]; h = m.model(input_ids=x).last_hidden_state[0]; W = m.lm_head.weight
             et = (ids == end_id).nonzero()[-1].item()
             p = torch.cat([torch.softmax((h[i:min(i + 2048, et)] @ W.T).float(), -1)[:, end_id] for i in range(plen - 1, et, 2048)])
-            hz.append(p[:-1].sum().item()); pe.append(p[-1].item()); early.append(p[:3000].sum().item())
+            hz.append(p[:-1].sum().item()); early.append(p[:3000].sum().item())
+        pe, pi, rk = [], [], []
+        for ids, plen in sitems:
+            x = ids.to(dev)[None]; h = m.model(input_ids=x).last_hidden_state[0]; W = m.lm_head.weight
+            et = (ids == end_id).nonzero()[-1].item()
+            pe.append(torch.softmax((h[et - 1] @ W.T).float(), -1)[end_id].item())
             lg = (h[len(ids) - 2] @ W.T).float(); pi.append(torch.softmax(lg, -1)[im_end_id].item()); rk.append(int((lg > lg[im_end_id]).sum().item()))
-        n = max(len(gitems), 1)
-        return dict(hazard=sum(hz) / n, p_end=sum(pe) / n, early=sum(early) / n, p_imend=sum(pi) / n, rank_max=max(rk) if rk else 0)
+        n1, n2 = max(len(gitems), 1), max(len(sitems), 1)
+        return dict(hazard=sum(hz) / n1, early=sum(early) / n1, p_end=sum(pe) / n2, p_imend=sum(pi) / n2, rank_max=max(rk) if rk else 0)
 
     gref = guards(T) if a.guard_stop else None
     if gref: print("GUARD teacher reference:", {k: round(v, 4) for k, v in gref.items()}, flush=True)
