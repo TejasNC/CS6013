@@ -106,6 +106,7 @@ def main():
     ap.add_argument("--guard-stop", action="store_true", help="run stop-token and hazard guards at every val check; stop at the first failure (im_end rank != 0, or hazard > 2x teacher)")
     ap.add_argument("--min-correct", type=int, default=60, help="if fewer correct budget survivors than this, also keep boxed incorrect answers")
     ap.add_argument("--w-incorrect-body", type=float, default=0.3, help="answer-body weight for incorrect-answer budget examples")
+    ap.add_argument("--val-ids", default="", help="comma-separated problem ids to hold out (overrides the random rule, which changes whenever more traces exist)")
     ap.add_argument("--init-adapters", default=None, help="warm start from adapters.pt/best_adapters.pt (same rank)")
     ap.add_argument("--end-windows", action="store_true", help="add prompt+last-K-token windows ending at </think> and the answer for finished correct traces")
     a = ap.parse_args()
@@ -118,7 +119,8 @@ def main():
     seqs, recs = [seqs[i] for i in keep], [recs[i] for i in keep]
     probs = sorted({(r["src"], r["id"]) for r in recs})
     rng = random.Random(1234); rng.shuffle(probs)
-    val_probs = set(probs[:a.val_problems])
+    val_probs = set(probs[:a.val_problems]) if not a.val_ids else {pp for pp in probs if pp[1] in set(a.val_ids.split(","))}
+    print("validation problems (held out of ALL training data in this run):", sorted(pp[1] for pp in val_probs), flush=True)
     # short correct traces (the shortest few per problem) get extra weight
     best = {}
     for i, r in enumerate(recs):
