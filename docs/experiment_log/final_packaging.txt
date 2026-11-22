@@ -1,0 +1,46 @@
+== packaged artifact hashes (Sun Nov 22 07:26:32 AM IST 2026)
+--- A2_v0
+total 2336154
+drwxr-xr-x  2 tejaschaudhari ug23         12 Nov 20 20:50 .
+drwxr-xr-x 17 tejaschaudhari ug23         64 Nov 22 07:20 ..
+-rw-r--r--  1 tejaschaudhari ug23       7756 Nov 20 20:50 chat_template.jinja
+-rw-r--r--  1 tejaschaudhari ug23      35335 Nov 20 20:50 comp_manifest.json
+-rw-r--r--  1 tejaschaudhari ug23       3161 Nov 20 20:50 config.json
+-rw-r--r--  1 tejaschaudhari ug23    3353259 Nov 20 20:50 merges.txt
+-rw-------  1 tejaschaudhari ug23 2367372208 Nov 20 20:50 model.safetensors
+-rw-r--r--  1 tejaschaudhari ug23        390 Nov 20 20:50 preprocessor_config.json
+-rw-r--r--  1 tejaschaudhari ug23      16710 Nov 20 20:50 tokenizer_config.json
+-rw-r--r--  1 tejaschaudhari ug23   12807982 Nov 20 20:50 tokenizer.json
+-rw-r--r--  1 tejaschaudhari ug23        385 Nov 20 20:50 video_preprocessor_config.json
+-rw-r--r--  1 tejaschaudhari ug23    6722759 Nov 20 20:50 vocab.json
+02f662a0ce2634cfeac62839a8b6b64325f7a6c608b488244817d1ee1a3c3358  /mnt/nas/tejaschaudhari/emir_data/ckpt/A2_v0/model.safetensors
+a08882aa522d5bb7257fd5440c74dfb8eda1f390f18b94d927024d59e0bfdae5  /mnt/nas/tejaschaudhari/emir_data/ckpt/A2_v0/comp_manifest.json
+Text tower:   1.5834 GiB (counted)
+Vision tower: 0.6212 GiB (not counted)
+size_frac = 1.5834 / 8.0585 = 19.65%
+Budgets: 20% <= 1.6117 GiB, 10% <= 0.8059 GiB (keep a margin)
+--- B3c_r3
+total 1500522
+drwxr-xr-x  2 tejaschaudhari ug23         12 Nov 21 10:29 .
+drwxr-xr-x 17 tejaschaudhari ug23         64 Nov 22 07:20 ..
+-rw-r--r--  1 tejaschaudhari ug23       7756 Nov 21 10:29 chat_template.jinja
+-rw-r--r--  1 tejaschaudhari ug23      35406 Nov 21 10:29 comp_manifest.json
+-rw-r--r--  1 tejaschaudhari ug23       3161 Nov 21 10:29 config.json
+-rw-r--r--  1 tejaschaudhari ug23    3353259 Nov 21 10:29 merges.txt
+-rw-------  1 tejaschaudhari ug23 1512230740 Nov 21 10:29 model.safetensors
+-rw-r--r--  1 tejaschaudhari ug23        390 Nov 21 10:29 preprocessor_config.json
+-rw-r--r--  1 tejaschaudhari ug23      16710 Nov 21 10:29 tokenizer_config.json
+-rw-r--r--  1 tejaschaudhari ug23   12807982 Nov 21 10:29 tokenizer.json
+-rw-r--r--  1 tejaschaudhari ug23        385 Nov 21 10:29 video_preprocessor_config.json
+-rw-r--r--  1 tejaschaudhari ug23    6722759 Nov 21 10:29 vocab.json
+2d17693a1367375ecd3c98d0797413a674f29f99270a0eb9db7ef5b8765c0859  /mnt/nas/tejaschaudhari/emir_data/ckpt/B3c_r3/model.safetensors
+6f17c85828fa6a4e1db125a9c41c67deabd0551d24102da0452096034de4fef9  /mnt/nas/tejaschaudhari/emir_data/ckpt/B3c_r3/comp_manifest.json
+Text tower:   0.7869 GiB (counted)
+Vision tower: 0.6212 GiB (not counted)
+size_frac = 0.7869 / 8.0585 = 9.76%
+Budgets: 20% <= 1.6117 GiB, 10% <= 0.8059 GiB (keep a margin)
+== clean CPU restore of A2 and comparison with the GPU restore used for vLLM
+edb2dc7635648abd837c0baf4cf47ca832ae7bacf0dd90536a5aa1749003f110  /mnt/nas/tejaschaudhari/emir_data/ckpt/A2_check/model.safetensors
+5d3ddb7e68caac3bc7e3dbb0589f31a83ef03e131c43e9fc4237312b1cfa2bb9  /mnt/nas/tejaschaudhari/emir_data/ckpt/A2_final_restored/model.safetensors
+A2: CPU vs GPU restore differ (checking tolerance next)
+DONE

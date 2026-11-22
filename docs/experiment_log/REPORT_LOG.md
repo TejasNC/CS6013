@@ -128,6 +128,19 @@ KL = teacher-forced KL(teacher‖student) on a frozen slice of 15 held-out teach
 Rebuild of base B3c_v0: see the recipe in `LOG.md` (plans/B3c.json, hess_v1 from 48 calibration sequences, tok_counts_v0).
 vLLM check: A2, A3, KD-2 and KD-3 were served with `--language-model-only --max-model-len 33000 --dtype bfloat16` and completed 100 HMMT generations each.
 
+### Packaging checks of the two fallback artifacts (Sun 07:45)
+
+| Check | A2 (20%) | Round 3 (10%) |
+|---|---|---|
+| Real packed size (TA formula, from the safetensors files) | 1.5834 GiB = 19.65% (limit 19.70%) | 0.7869 GiB = 9.76% (limit 9.85%) |
+| Packed files | `emir_data/ckpt/A2_v0/` (model.safetensors + comp_manifest.json + config/tokenizer files) | `emir_data/ckpt/B3c_r3/` (model.safetensors 1,512,230,740 bytes + comp_manifest.json + config/tokenizer files) |
+| sha256 of model.safetensors | see `emir_data/final_packaging.txt` | 2d17693a1367375ecd3c98d0797413a674f29f99270a0eb9db7ef5b8765c0859 |
+| Clean restore, byte-identical rerun | GPU restore done twice for the vLLM checks | restored on a fresh run: sha256 identical to the restored directory used in the evals (89b5f5e7…fe0a) |
+| CPU vs GPU restore | differ bytewise: 0.78% of weights differ by one bf16 ulp (max abs diff 1.2e-4, relative Frobenius 3.5e-5; layer-10 up_proj test), a device rounding difference; each device is deterministic | same effect expected |
+| vLLM load | `--language-model-only --max-model-len 33000 --dtype bfloat16` on a fresh restore, answers 12*13 with 156 | the same flags for the whole HMMT-Nov run; sample answers 156 |
+| Restore commands | `python -m compress_lib.restore --comp A2_v0 --out A2_v0_restored` | `python -m compress_lib.lora_io --comp B3c_v0 --adapters round3_final_adapters.pt --out B3c_r3` (packing) then `python -m compress_lib.restore --comp B3c_r3 --out B3c_r3_restored` |
+| Restore needs | only the packed directory: no network, no model_name | same |
+
 ### Status
 
 - 20%: **A2 final** (19.65%, HMMT-Feb 42.0 ± 6.8, cap 52%). A3 (19.59%, 37.0 ± 6.5, cap 56%) fails D12 and is not used.
